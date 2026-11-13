@@ -10,24 +10,44 @@ Bir niş seçersiniz; panel Claude ile nişi araştırır, 30 günlük içerik t
 
 Panelde her videonun durumu (Taslak → Onaylı → Üretiliyor → Hazır → Yüklendi), önizlemesi, sahne görselleri ve işlem kayıtları görünür.
 
-## Gereksinimler
+## Kendi bilgisayarınızda kurulum
 
-- Node.js 20+ (22 önerilir)
-- FFmpeg (libass ile; Ubuntu/Debian'da `apt install ffmpeg`, macOS'ta `brew install ffmpeg`, Windows'ta ffmpeg.org'dan "full" sürüm)
+### 1. Gerekli programlar (bir kez)
 
-## Kurulum
+**Windows**
+1. **Node.js 22 LTS**: nodejs.org'dan indirip kurun.
+2. **FFmpeg**: PowerShell'i açıp `winget install Gyan.FFmpeg` yazın, sonra PowerShell'i kapatıp yeniden açın. `ffmpeg -version` çalışıyorsa tamam.
+3. **Git**: `winget install Git.Git` (ya da GitHub Desktop).
+
+**macOS**: `brew install node ffmpeg git`
+
+### 2. Projeyi indirip kurun (bir kez)
 
 ```bash
+git clone https://github.com/furrmaz/youtube-shorts-otomasyon.git
+cd youtube-shorts-otomasyon
 npm install
-cp .env.example .env        # anahtarları doldurun
-npx prisma db push          # SQLite veritabanını oluşturur
-npm run demo                # (isteğe bağlı) anahtarsız deneme videosu üretir -> media/<id>/short.mp4
-npm run build
-npm start                   # panel: http://localhost:3000
-npm run worker              # ayrı terminalde: zamanlayıcı (üretim + yükleme)
+copy .env.example .env      # macOS/Linux: cp .env.example .env
 ```
 
-Geliştirme sırasında `npm run dev` kullanabilirsiniz. Panel ve worker aynı `.env` ve veritabanını kullanır, ikisi de sürekli çalışmalıdır.
+`.env` dosyasını Not Defteri ile açıp en azından `PANEL_PASSWORD` ve `ANTHROPIC_API_KEY` değerlerini girin (diğerleri aşağıda). Sonra:
+
+```bash
+npm run kurulum             # veritabanını oluşturur ve uygulamayı derler
+npm run demo                # (isteğe bağlı) anahtarsız deneme videosu -> media/<id>/short.mp4
+```
+
+### 3. Çalıştırma (her seferinde)
+
+```bash
+npm run baslat
+```
+
+Tarayıcıda **http://localhost:3000** adresini açın. Bu komut paneli ve zamanlayıcıyı birlikte çalıştırır; videoların üretilip yüklenmesi için pencere açık kalmalı ve bilgisayar uykuya geçmemeli. Kapatmak için `Ctrl+C`.
+
+İpucu: Videolar yayın saatinden `produceHoursAhead` saat önce (varsayılan 6) üretilip YouTube'a ileri tarihli yüklenir. YouTube yayını kendisi yapar, yani yükleme bittikten sonra bilgisayarın açık olması gerekmez. Bilgisayarı günde bir kez birkaç saat açık tutmanız yeterli; daha fazla günü önceden hazırlamak için Ayarlar'dan bu süreyi artırabilirsiniz (ör. 48).
+
+`.env` veya kod değiştiyse `npm run kurulum` komutunu tekrar çalıştırın.
 
 ## Anahtarlar (.env)
 
@@ -38,6 +58,8 @@ Geliştirme sırasında `npm run dev` kullanabilirsiniz. Panel ve worker aynı `
 | `ELEVENLABS_API_KEY` | elevenlabs.io → Profile → API Keys. Ses ID'si panelde Ayarlar'a girilir |
 | `FAL_KEY` veya `REPLICATE_API_TOKEN` | fal.ai veya replicate.com hesabı |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Aşağıdaki adımlar |
+
+`.env` içinde `ffmpeg` bulunamazsa tam yolunu `FFMPEG_PATH` ve `FFPROBE_PATH` ile verebilirsiniz.
 
 Anahtar olmadan da panel çalışır: Ayarlar'da ses ve görsel sağlayıcısını "Deneme" seçerseniz sessiz ses ve degrade görsellerle tüm hat denenebilir. Takvim üretimi için Claude anahtarı şarttır.
 
