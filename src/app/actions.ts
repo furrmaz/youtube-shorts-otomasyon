@@ -3,7 +3,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import fs from "node:fs/promises";
 import { prisma } from "@/lib/db";
-import { generateCalendar, produceItem, uploadItem } from "@/lib/pipeline";
+import { createQuickVideo, generateCalendar, produceItem, uploadItem } from "@/lib/pipeline";
+import { requireAuth, setAuthCookie } from "@/lib/auth";
+import { cfg } from "@/lib/config";
+import { testClaude } from "@/lib/claude";
 import { itemDir } from "@/lib/paths";
 import { getSettings } from "@/lib/settings";
 import { zonedToUtc } from "@/lib/time";
@@ -11,6 +14,7 @@ import { zonedToUtc } from "@/lib/time";
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 
 export async function saveSettings(f: FormData) {
+  await requireAuth();
   const data = {
     niche: str(f, "niche"),
     language: str(f, "language") || "tr",
@@ -32,6 +36,7 @@ export async function saveSettings(f: FormData) {
 }
 
 export async function startCalendar(f: FormData) {
+  await requireAuth();
   const days = Math.min(60, Math.max(1, Number(str(f, "days")) || 30));
   // Uzun sürer (birkaç dakika): arka planda çalıştır, sayfa durumu gösterir
   void generateCalendar(days);
@@ -40,6 +45,7 @@ export async function startCalendar(f: FormData) {
 }
 
 export async function saveItem(f: FormData) {
+  await requireAuth();
   const id = str(f, "id");
   const tags = str(f, "tags").split(",").map((t) => t.trim()).filter(Boolean);
   const item = await prisma.contentItem.findUniqueOrThrow({ where: { id } });
@@ -71,6 +77,7 @@ async function clearMedia(id: string) {
 }
 
 export async function setStatus(f: FormData) {
+  await requireAuth();
   const id = str(f, "id");
   const status = str(f, "status");
   if (!["DRAFT", "APPROVED"].includes(status)) return;
@@ -83,11 +90,13 @@ export async function setStatus(f: FormData) {
 }
 
 export async function approveAll() {
+  await requireAuth();
   await prisma.contentItem.updateMany({ where: { status: "DRAFT" }, data: { status: "APPROVED" } });
   revalidatePath("/calendar");
 }
 
 export async function deleteItem(f: FormData) {
+  await requireAuth();
   const id = str(f, "id");
   await prisma.contentItem.deleteMany({ where: { id, status: { not: "UPLOADED" } } });
   await clearMedia(id);
@@ -95,6 +104,7 @@ export async function deleteItem(f: FormData) {
 }
 
 export async function produceNow(f: FormData) {
+  await requireAuth();
   const id = str(f, "id");
   await prisma.contentItem.updateMany({ where: { id, status: "DRAFT" }, data: { status: "APPROVED" } });
   void produceItem(id);
@@ -103,6 +113,7 @@ export async function produceNow(f: FormData) {
 }
 
 export async function regenerateMedia(f: FormData) {
+  await requireAuth();
   const id = str(f, "id");
   await clearMedia(id);
   await prisma.contentItem.updateMany({
@@ -115,6 +126,7 @@ export async function regenerateMedia(f: FormData) {
 }
 
 export async function uploadNow(f: FormData) {
+  await requireAuth();
   const id = str(f, "id");
   await prisma.contentItem.updateMany({ where: { id, status: "READY" }, data: { error: null } });
   void uploadItem(id);
@@ -123,6 +135,76 @@ export async function uploadNow(f: FormData) {
 }
 
 export async function disconnectYoutube() {
+  await requireAuth();
   await prisma.youtubeAccount.deleteMany({});
   revalidatePath("/");
+}
+
+const SECRET_FIELDS = [
+  "anthropicApiKey", "elevenApiKey", "falKey", "replicateToken", "googleClientSecret", "panelPassword",
+] as const;
+const PLAIN_FIELDS = ["claudeModel", "elevenModelId", "falModel", "replicateModel", "googleClientId", "appUrl"] as const;
+
+/** API anahtarları: boş bırakılan gizli alan mevcut değeri korur, "kaldır" işaretliyse silinir */
+export async function saveKeys(f: FormData) {
+  await requireAuth();
+  const data: Record<string, string> = {};
+  for (const k of SECRET_FIELDS) {
+    if (f.get(`clear_${k}`) === "on") data[k] = "";
+    else if (str(f, k)) data[k] = str(f, k);
+  }
+  for (const k of PLAIN_FIELDS) data[k] = str(f, k);
+  await prisma.settings.upsert({ where: { id: 1 }, update: data, create: { id: 1, ...data } });
+  // Şifre değiştiyse bu tarayıcıda oturum açık kalsın
+  const { panelPassword } = await cfg();
+  if (panelPassword) await setAuthCookie(panelPassword);
+  revalidatePath("/", "layout");
+  redirect("/settings?saved=keys#anahtarlar");
+}
+
+export async function testKeys() {
+  await requireAuth();
+  const c = await cfg();
+  const results: Record<string, string> = {};
+  const check = async (name: string, fn: () => Promise<string>) => {
+    try {
+      const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error("zaman aşımı (20 sn)")), 20_000));
+      results[name] = "✓ " + (await Promise.race([fn(), timeout]));
+    } catch (e) {
+      const msg = (e as Error).message;
+      results[name] = "✗ " + (/^401\b|HTTP 401/.test(msg) ? "anahtar geçersiz (401)" : msg.slice(0, 160));
+    }
+  };
+  await Promise.all([
+    check("Claude", testClaude),
+    check("ElevenLabs", async () => {
+      if (!c.elevenApiKey) throw new Error("anahtar girilmemiş");
+      const r = await fetch("https://api.elevenlabs.io/v1/user/subscription", { headers: { "xi-api-key": c.elevenApiKey } });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = (await r.json()) as { character_count?: number; character_limit?: number; tier?: string };
+      return `bağlandı (${d.tier ?? ""}, ${d.character_count ?? "?"}/${d.character_limit ?? "?"} karakter)`;
+    }),
+    check("Replicate", async () => {
+      if (!c.replicateToken) throw new Error("anahtar girilmemiş");
+      const r = await fetch("https://api.replicate.com/v1/account", { headers: { Authorization: `Bearer ${c.replicateToken}` } });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return "bağlandı";
+    }),
+    check("fal.ai", async () => {
+      if (!c.falKey) throw new Error("anahtar girilmemiş");
+      return "girildi (ilk görselde doğrulanır)";
+    }),
+    check("Google", async () => {
+      if (!c.googleClientId || !c.googleClientSecret) throw new Error("Client ID / Secret girilmemiş");
+      return "girildi, panelden kanalı bağlayın";
+    }),
+  ]);
+  redirect(`/settings?test=${encodeURIComponent(JSON.stringify(results))}#anahtarlar`);
+}
+
+/** İstenildiği anda yeni video */
+export async function quickVideo(f: FormData) {
+  await requireAuth();
+  const id = await createQuickVideo({ topicHint: str(f, "topic"), publishNow: str(f, "mode") === "publish" });
+  redirect(`/items/${id}`);
 }

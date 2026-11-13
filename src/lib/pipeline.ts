@@ -11,6 +11,15 @@ import { renderVideo, timeScenes, type Scene } from "./video";
 import { uploadShort } from "./youtube";
 import { addDaysYmd, parsePublishTimes, ymdInTz, zonedToUtc } from "./time";
 
+/** API hatalarını anlaşılır Türkçe mesaja çevirir */
+function explain(e: unknown): string {
+  const msg = (e as Error)?.message ?? String(e);
+  if (/^401\b/.test(msg) && /x-api-key|authentication/.test(msg)) return "Claude API anahtarı geçersiz (Ayarlar → API anahtarları)";
+  if (/^429\b/.test(msg)) return "Claude kullanım sınırına takıldı, biraz sonra tekrar deneyin";
+  if (/credit balance/i.test(msg)) return "Claude hesabında kredi yok (console.anthropic.com → Billing)";
+  return msg;
+}
+
 // Aynı süreç içinde paralel çalışmayı engelleyen basit kilit
 const g = globalThis as unknown as { __busy?: Set<string>; __calendarJob?: CalendarJob };
 const busy = (g.__busy ??= new Set<string>());
@@ -71,7 +80,7 @@ export async function generateCalendar(days = 30) {
     job.message = `Tamamlandı: ${made} video planlandı`;
     await log(job.message);
   } catch (e) {
-    job.error = (e as Error).message;
+    job.error = explain(e);
     job.message = "Hata";
     await log(`Takvim üretimi başarısız: ${job.error}`, { level: "error" });
   } finally {
@@ -147,8 +156,8 @@ export async function produceItem(id: string) {
     });
     await log("Video hazır", { itemId: id });
   } catch (e) {
-    await prisma.contentItem.update({ where: { id }, data: { status: "FAILED", error: (e as Error).message } });
-    await log(`Üretim hatası: ${(e as Error).message}`, { itemId: id, level: "error" });
+    await prisma.contentItem.update({ where: { id }, data: { status: "FAILED", error: explain(e) } });
+    await log(`Üretim hatası: ${explain(e)}`, { itemId: id, level: "error" });
   } finally {
     busy.delete(id);
   }
@@ -178,8 +187,8 @@ export async function uploadItem(id: string) {
     await log(`YouTube'a yüklendi: https://youtube.com/shorts/${videoId}`, { itemId: id });
   } catch (e) {
     // Video hazır kalsın; panelden tekrar denenebilir
-    await prisma.contentItem.update({ where: { id }, data: { status: "READY", error: `Yükleme: ${(e as Error).message}` } });
-    await log(`Yükleme hatası: ${(e as Error).message}`, { itemId: id, level: "error" });
+    await prisma.contentItem.update({ where: { id }, data: { status: "READY", error: `Yükleme: ${explain(e)}` } });
+    await log(`Yükleme hatası: ${explain(e)}`, { itemId: id, level: "error" });
   }
 }
 
@@ -199,8 +208,7 @@ export async function tick() {
 
     if (yt) {
       const ready = await prisma.contentItem.findMany({
-        // dayIndex 0 = `npm run demo` ile oluşturulan deneme videosu, otomatik yüklenmez
-        where: { status: "READY", error: null, dayIndex: { gt: 0 } },
+        where: { status: "READY", error: null, autoUpload: true },
         orderBy: { publishAt: "asc" },
         take: 3,
       });
@@ -210,7 +218,68 @@ export async function tick() {
 
   // Takılı kalmış işler (ör. süreç çöktü): 1 saatten eskiyse FAILED yap
   await prisma.contentItem.updateMany({
-    where: { status: { in: ["PRODUCING", "UPLOADING"] }, updatedAt: { lt: new Date(now - 3600_000) } },
+    where: { status: { in: ["WRITING", "PRODUCING", "UPLOADING"] }, updatedAt: { lt: new Date(now - 3600_000) } },
     data: { status: "FAILED", error: "İşlem yarıda kaldı, tekrar deneyin" },
   });
+}
+
+/**
+ * İstenildiği anda tek video: Claude metni yazar, video üretilir,
+ * `publishNow` ise hemen YouTube'a yüklenir; değilse "Hazır"da bekler.
+ */
+export async function createQuickVideo(opts: { topicHint: string; publishNow: boolean }): Promise<string> {
+  const item = await prisma.contentItem.create({
+    data: {
+      dayIndex: 0,
+      publishAt: new Date(),
+      topic: opts.topicHint || "Yeni video",
+      hook: "",
+      script: "",
+      title: opts.topicHint ? `${opts.topicHint} (yazılıyor…)` : "Yeni video (yazılıyor…)",
+      description: "",
+      tags: "[]",
+      status: "WRITING",
+      autoUpload: opts.publishNow,
+    },
+  });
+  void runQuickVideo(item.id, opts.topicHint, opts.publishNow);
+  return item.id;
+}
+
+async function runQuickVideo(id: string, topicHint: string, publishNow: boolean) {
+  try {
+    const s = await getSettings();
+    if (!s.niche.trim() && !topicHint) throw new Error("Ayarlar'dan niş girin veya bir konu yazın");
+    await log(`Yeni video: metin yazılıyor${topicHint ? ` ("${topicHint}")` : ""}`, { itemId: id });
+    const previous = await prisma.contentItem.findMany({
+      where: { id: { not: id } }, select: { topic: true }, orderBy: { createdAt: "desc" }, take: 60,
+    });
+    const brief = topicHint
+      ? `Bu videonun konusu kullanıcı tarafından belirlendi: "${topicHint}". Bu konuyu işle.`
+      : "Ayrı bir araştırma raporu yok; nişte ilgi çekici, doğruluğundan emin olduğun bir konu seç.";
+    const [it] = await generateCalendarChunk(s, brief, 1, previous.map((p) => p.topic));
+    if (!it) throw new Error("Claude metin döndürmedi");
+    await prisma.contentItem.update({
+      where: { id },
+      data: {
+        topic: it.topic, hook: it.hook, script: it.script, title: it.title,
+        description: it.description, tags: JSON.stringify(it.tags), status: "APPROVED",
+      },
+    });
+    await log(`Metin hazır: ${it.title}`, { itemId: id });
+    await produceItem(id);
+    const after = await prisma.contentItem.findUniqueOrThrow({ where: { id } });
+    if (publishNow && after.status === "READY") {
+      const yt = await prisma.youtubeAccount.findUnique({ where: { id: 1 } });
+      if (yt) await uploadItem(id);
+      else await log("YouTube bağlı olmadığı için video Hazır'da bekliyor", { itemId: id, level: "warn" });
+    }
+  } catch (e) {
+    const cur = await prisma.contentItem.findUnique({ where: { id } });
+    await prisma.contentItem.update({
+      where: { id },
+      data: { status: "FAILED", error: explain(e), title: (cur?.title ?? "").replace(" (yazılıyor…)", "") },
+    });
+    await log(`Yeni video hatası: ${explain(e)}`, { itemId: id, level: "error" });
+  }
 }

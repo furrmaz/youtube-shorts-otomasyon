@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { ffmpeg } from "./ffmpeg";
+import { cfg } from "./config";
 
 export type Word = { word: string; start: number; end: number };
 export type TtsResult = { audioPath: string; words: Word[]; duration: number };
@@ -26,8 +27,9 @@ export function charsToWords(chars: string[], starts: number[], ends: number[]):
 }
 
 async function elevenLabs(text: string, voiceId: string, outPath: string): Promise<TtsResult> {
-  const key = process.env.ELEVENLABS_API_KEY;
-  if (!key) throw new Error("ELEVENLABS_API_KEY tanımlı değil");
+  const c = await cfg();
+  const key = c.elevenApiKey;
+  if (!key) throw new Error("ElevenLabs API anahtarı girilmemiş (Ayarlar → API anahtarları)");
   if (!voiceId) throw new Error("Ayarlarda ElevenLabs ses ID'si boş");
   const res = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=mp3_44100_128`,
@@ -36,7 +38,7 @@ async function elevenLabs(text: string, voiceId: string, outPath: string): Promi
       headers: { "xi-api-key": key, "content-type": "application/json" },
       body: JSON.stringify({
         text,
-        model_id: process.env.ELEVENLABS_MODEL_ID || "eleven_multilingual_v2",
+        model_id: c.elevenModelId,
         voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2, use_speaker_boost: true },
       }),
     },
@@ -65,4 +67,14 @@ async function mock(text: string, outPath: string): Promise<TtsResult> {
 
 export async function synthesize(provider: string, text: string, voiceId: string, outPath: string) {
   return provider === "elevenlabs" ? elevenLabs(text, voiceId, outPath) : mock(text, outPath);
+}
+
+export type Voice = { voice_id: string; name: string; labels?: Record<string, string> };
+
+/** ElevenLabs hesabındaki sesler (panelde seçim için) */
+export async function listVoices(apiKey: string): Promise<Voice[]> {
+  const r = await fetch("https://api.elevenlabs.io/v1/voices", { headers: { "xi-api-key": apiKey }, cache: "no-store" });
+  if (!r.ok) throw new Error(`ElevenLabs ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const data = (await r.json()) as { voices: Voice[] };
+  return data.voices;
 }

@@ -2,8 +2,8 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 import { formatLocal } from "@/lib/time";
-import { disconnectYoutube } from "./actions";
-import { STATUS_TR } from "./status";
+import { disconnectYoutube, quickVideo } from "@/app/actions";
+import { STATUS_TR } from "@/app/status";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +42,21 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           </>
         )}
       </div>
+
+      <form action={quickVideo} className="card">
+        <h2 style={{ marginTop: 0 }}>Yeni video üret</h2>
+        <div className="row">
+          <input name="topic" placeholder="Konu (isteğe bağlı, boşsa Claude nişten seçer)" style={{ flex: 1, minWidth: 220 }} />
+          <select name="mode" defaultValue="publish" style={{ width: "auto" }}>
+            <option value="publish">Üret ve hemen yayınla</option>
+            <option value="review">Üret, önce ben bakayım</option>
+          </select>
+          <button>Üret</button>
+        </div>
+        <p className="muted" style={{ marginBottom: 0 }}>
+          Claude metni yazar, ses ve görseller üretilir, video hazırlanır (birkaç dakika). Otomatik takvim ayrıca çalışmaya devam eder.
+        </p>
+      </form>
 
       <div className="card">
         <div className="muted" style={{ marginBottom: 8 }}>

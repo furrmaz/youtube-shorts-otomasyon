@@ -2,10 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { MEDIA_DIR } from "@/lib/paths";
+import { isAuthed } from "@/lib/auth";
 
 const TYPES: Record<string, string> = { ".mp4": "video/mp4", ".png": "image/png", ".jpg": "image/jpeg", ".mp3": "audio/mpeg" };
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string; file: string }> }) {
+  if (!(await isAuthed())) return new Response("Unauthorized", { status: 401 });
   const { id, file } = await params;
   if (!/^[a-z0-9]+$/i.test(id) || !/^[\w.-]+$/.test(file) || file.includes("..")) return new Response("Bad request", { status: 400 });
   const p = path.join(MEDIA_DIR, id, file);

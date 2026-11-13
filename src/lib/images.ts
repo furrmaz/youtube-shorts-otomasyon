@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { ffmpeg } from "./ffmpeg";
+import { cfg } from "./config";
 
 /**
  * Görsel sağlayıcı arayüzü. Yeni bir sağlayıcı (ör. Higgsfield) eklemek için
@@ -14,9 +15,10 @@ async function download(url: string, outPath: string) {
 }
 
 const fal: ImageProvider = async (prompt, outPath, seed) => {
-  const key = process.env.FAL_KEY;
-  if (!key) throw new Error("FAL_KEY tanımlı değil");
-  const model = process.env.FAL_MODEL || "fal-ai/flux/dev";
+  const c = await cfg();
+  const key = c.falKey;
+  if (!key) throw new Error("fal.ai anahtarı girilmemiş (Ayarlar → API anahtarları)");
+  const model = c.falModel;
   const r = await fetch(`https://fal.run/${model}`, {
     method: "POST",
     headers: { Authorization: `Key ${key}`, "content-type": "application/json" },
@@ -30,9 +32,10 @@ const fal: ImageProvider = async (prompt, outPath, seed) => {
 };
 
 const replicate: ImageProvider = async (prompt, outPath, seed) => {
-  const token = process.env.REPLICATE_API_TOKEN;
-  if (!token) throw new Error("REPLICATE_API_TOKEN tanımlı değil");
-  const model = process.env.REPLICATE_MODEL || "black-forest-labs/flux-schnell";
+  const c = await cfg();
+  const token = c.replicateToken;
+  if (!token) throw new Error("Replicate anahtarı girilmemiş (Ayarlar → API anahtarları)");
+  const model = c.replicateModel;
   const headers = { Authorization: `Bearer ${token}`, "content-type": "application/json", Prefer: "wait" };
   let r = await fetch(`https://api.replicate.com/v1/models/${model}/predictions`, {
     method: "POST",

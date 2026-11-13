@@ -1,26 +1,26 @@
 import fs from "node:fs";
 import { google } from "googleapis";
 import { prisma } from "./db";
+import { cfg } from "./config";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/youtube.upload",
   "https://www.googleapis.com/auth/youtube.readonly",
 ];
 
-export function oauthClient() {
-  const id = process.env.GOOGLE_CLIENT_ID;
-  const secret = process.env.GOOGLE_CLIENT_SECRET;
-  if (!id || !secret) throw new Error("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET tanımlı değil");
-  const base = process.env.APP_URL || "http://localhost:3000";
-  return new google.auth.OAuth2(id, secret, `${base}/api/youtube/callback`);
+export async function oauthClient() {
+  const c = await cfg();
+  if (!c.googleClientId || !c.googleClientSecret)
+    throw new Error("Google OAuth bilgileri girilmemiş (Ayarlar → API anahtarları)");
+  return new google.auth.OAuth2(c.googleClientId, c.googleClientSecret, `${c.appUrl}/api/youtube/callback`);
 }
 
-export function authUrl(state: string) {
-  return oauthClient().generateAuthUrl({ access_type: "offline", prompt: "consent", scope: SCOPES, state });
+export async function authUrl(state: string) {
+  return (await oauthClient()).generateAuthUrl({ access_type: "offline", prompt: "consent", scope: SCOPES, state });
 }
 
 export async function handleCallback(code: string) {
-  const client = oauthClient();
+  const client = await oauthClient();
   const { tokens } = await client.getToken(code);
   client.setCredentials(tokens);
   const yt = google.youtube({ version: "v3", auth: client });
@@ -44,7 +44,7 @@ export async function handleCallback(code: string) {
 async function authedClient() {
   const acc = await prisma.youtubeAccount.findUnique({ where: { id: 1 } });
   if (!acc) throw new Error("YouTube kanalı bağlı değil");
-  const client = oauthClient();
+  const client = await oauthClient();
   client.setCredentials({
     access_token: acc.accessToken,
     refresh_token: acc.refreshToken,
