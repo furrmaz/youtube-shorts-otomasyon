@@ -5,8 +5,8 @@ import { prisma } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 import { formatLocal } from "@/lib/time";
 import type { Scene } from "@/lib/video";
-import { produceNow, regenerateMedia, setStatus, uploadNow } from "../../actions";
-import { STATUS_TR } from "../../status";
+import { produceNow, regenerateMedia, setStatus, uploadNow } from "@/app/actions";
+import { STATUS_TR } from "@/app/status";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,7 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
   const yt = await prisma.youtubeAccount.findUnique({ where: { id: 1 } });
   const scenes: Scene[] = it.scenes ? JSON.parse(it.scenes) : [];
   const v = it.updatedAt.getTime();
-  const busy = it.status === "PRODUCING" || it.status === "UPLOADING";
+  const busy = ["WRITING", "PRODUCING", "UPLOADING"].includes(it.status);
 
   return (
     <>
@@ -28,7 +28,9 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
         <span className={`badge ${it.status}`}>{STATUS_TR[it.status]}</span>
         <span className="muted">Yayın: {formatLocal(it.publishAt, s.timezone)} · Deneme {it.attempts}</span>
         {it.youtubeVideoId && <a href={`https://youtube.com/shorts/${it.youtubeVideoId}`} target="_blank">YouTube&apos;da aç</a>}
-        {busy && <span className="muted">⏳ işlem sürüyor, sayfayı yenileyin</span>}
+        {busy && <span className="muted">⏳ işlem sürüyor, sayfa kendini yeniliyor</span>}
+        {busy && <meta httpEquiv="refresh" content="8" />}
+        {it.status === "READY" && !it.autoUpload && <span className="muted">Otomatik yüklenmeyecek, kontrol edip yükleyin</span>}
       </div>
       {it.error && <div className="card err">{it.error}</div>}
 

@@ -30,12 +30,15 @@ npm install
 copy .env.example .env      # macOS/Linux: cp .env.example .env
 ```
 
-`.env` dosyasını Not Defteri ile açıp en azından `PANEL_PASSWORD` ve `ANTHROPIC_API_KEY` değerlerini girin (diğerleri aşağıda). Sonra:
+Sonra:
 
 ```bash
 npm run kurulum             # veritabanını oluşturur ve uygulamayı derler
 npm run demo                # (isteğe bağlı) anahtarsız deneme videosu -> media/<id>/short.mp4
 ```
+
+> Windows'ta `npm` komutu "running scripts is disabled" hatası verirse PowerShell'de bir kez
+> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` çalıştırın (ya da `npm` yerine `npm.cmd` yazın).
 
 ### 3. Çalıştırma (her seferinde)
 
@@ -47,28 +50,29 @@ Tarayıcıda **http://localhost:3000** adresini açın. Bu komut paneli ve zaman
 
 İpucu: Videolar yayın saatinden `produceHoursAhead` saat önce (varsayılan 6) üretilip YouTube'a ileri tarihli yüklenir. YouTube yayını kendisi yapar, yani yükleme bittikten sonra bilgisayarın açık olması gerekmez. Bilgisayarı günde bir kez birkaç saat açık tutmanız yeterli; daha fazla günü önceden hazırlamak için Ayarlar'dan bu süreyi artırabilirsiniz (ör. 48).
 
-`.env` veya kod değiştiyse `npm run kurulum` komutunu tekrar çalıştırın.
+Güncelleme geldiğinde: `git pull`, `npm install`, `npm run kurulum`, sonra yine `npm run baslat`.
 
-## Anahtarlar (.env)
+## API anahtarları
 
-| Değişken | Nereden |
+Tüm anahtarlar ve ayarlar panelden girilir: **Ayarlar → API anahtarları**. Anahtarlar sadece bilgisayarınızdaki veritabanında saklanır. "Kayıtlı anahtarları test et" ile bağlantıları kontrol edebilirsiniz; ElevenLabs anahtarı girildiğinde sesler listeden seçilebilir.
+
+| Anahtar | Nereden |
 |---|---|
-| `PANEL_PASSWORD` | Kendi belirlediğiniz panel şifresi |
-| `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys |
-| `ELEVENLABS_API_KEY` | elevenlabs.io → Profile → API Keys. Ses ID'si panelde Ayarlar'a girilir |
-| `FAL_KEY` veya `REPLICATE_API_TOKEN` | fal.ai veya replicate.com hesabı |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Aşağıdaki adımlar |
+| Claude | console.anthropic.com → API Keys |
+| ElevenLabs | elevenlabs.io → Settings → API Keys |
+| fal.ai veya Replicate | fal.ai/dashboard/keys veya replicate.com/account/api-tokens |
+| Google Client ID / Secret | Aşağıdaki adımlar |
 
-`.env` içinde `ffmpeg` bulunamazsa tam yolunu `FFMPEG_PATH` ve `FFPROBE_PATH` ile verebilirsiniz.
+Panel şifresi isteğe bağlıdır; boşsa panel şifresiz açılır (sadece kendi bilgisayarınızda önerilir). İsterseniz anahtarları `.env` ile de verebilirsiniz; panelde girilen değer önceliklidir.
 
-Anahtar olmadan da panel çalışır: Ayarlar'da ses ve görsel sağlayıcısını "Deneme" seçerseniz sessiz ses ve degrade görsellerle tüm hat denenebilir. Takvim üretimi için Claude anahtarı şarttır.
+Anahtar olmadan da her şey denenebilir: Ayarlar'da ses ve görsel sağlayıcısını "Deneme" seçin. Metin yazımı için Claude anahtarı şarttır.
 
 ### YouTube bağlantısı (Google Cloud)
 
 1. console.cloud.google.com'da bir proje açın, **YouTube Data API v3**'ü etkinleştirin.
 2. *OAuth consent screen*: External, uygulama adını girin, kendi Gmail adresinizi **Test users** listesine ekleyin.
 3. *Credentials → Create credentials → OAuth client ID → Web application*. Authorized redirect URI: `APP_URL/api/youtube/callback` (ör. `http://localhost:3000/api/youtube/callback`).
-4. Client ID ve secret'ı `.env`'e yazın, panelde **YouTube kanalını bağla**'ya basın.
+4. Client ID ve secret'ı **Ayarlar → API anahtarları**'na girin, sonra Panel'de **YouTube kanalını bağla**'ya basın.
 
 > **Önemli:** Google, doğrulanmamış (audit edilmemiş) API projelerinden yüklenen videoları **özel (private) olarak kilitler**. Herkese açık yayın için projeniz için Google'a "YouTube API Services audit" başvurusu yapmanız gerekir (ücretsiz, birkaç gün-hafta sürebilir). Bu sürede videolar yüklenir ama özel kalır; elle herkese açık yapabilirsiniz.
 >
@@ -77,6 +81,7 @@ Anahtar olmadan da panel çalışır: Ayarlar'da ses ve görsel sağlayıcısın
 ## Nasıl çalışır
 
 - **Ayarlar**: niş, dil, kanal tonu, görsel stil, ElevenLabs ses ID, günde kaç video, yayın saatleri, saat dilimi, gizlilik.
+- **Panel → Yeni video üret**: istediğiniz anda tek video. Konu yazabilir ya da boş bırakıp Claude'a seçtirebilirsiniz. "Üret ve hemen yayınla" video hazır olunca yükler; "Üret, önce ben bakayım" videoyu Hazır'da bekletir, siz izleyip yüklersiniz.
 - **İçerik takvimi → Takvim oluştur**: Claude web aramasıyla nişi araştırır, sonra 6'şarlı gruplar halinde senaryoları yazar (birkaç dakika sürer). Takvim, var olan son planlı günden sonra devam eder.
 - Taslakları düzenleyip **Onayla** (veya "Tüm taslakları onayla").
 - **Worker** her dakika bakar: yayın saatine `produceHoursAhead` saat kalan onaylı videoları üretir, hazır olanları YouTube'a yükler (ileri tarihli yayınla). İsterseniz video detayında **Şimdi üret** / **YouTube'a yükle** ile elle de tetikleyebilirsiniz.

@@ -23,6 +23,19 @@ model Settings {
   ttsProvider       String   @default("mock")   // mock | elevenlabs
   autoProduce       Boolean  @default(true)
   produceHoursAhead Int      @default(6)
+  // API anahtarları ve bağlantılar (panelden girilir; boşsa .env'deki değer kullanılır)
+  panelPassword      String  @default("")
+  anthropicApiKey    String  @default("")
+  claudeModel        String  @default("")
+  elevenApiKey       String  @default("")
+  elevenModelId      String  @default("")
+  falKey             String  @default("")
+  falModel           String  @default("")
+  replicateToken     String  @default("")
+  replicateModel     String  @default("")
+  googleClientId     String  @default("")
+  googleClientSecret String  @default("")
+  appUrl             String  @default("")
   updatedAt         DateTime @updatedAt
 }
 
@@ -46,7 +59,7 @@ model ContentItem {
   title          String
   description    String
   tags           String    // JSON dizi
-  // DRAFT -> APPROVED -> PRODUCING -> READY -> UPLOADING -> UPLOADED | FAILED
+  // WRITING (Claude metni yazıyor) / DRAFT -> APPROVED -> PRODUCING -> READY -> UPLOADING -> UPLOADED | FAILED
   status         String    @default("DRAFT")
   scenes         String?   // JSON: [{text, imagePrompt, start, end, image}]
   audioPath      String?
@@ -54,6 +67,7 @@ model ContentItem {
   youtubeVideoId String?
   error          String?
   attempts       Int       @default(0)
+  autoUpload     Boolean   @default(true) // false: hazır olunca bekler, elle yüklenir
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   logs           JobLog[]

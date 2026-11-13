@@ -2,15 +2,21 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import type { AppSettings } from "./settings";
-
-const MODEL = process.env.CLAUDE_MODEL || "claude-opus-5-5";
+import { cfg } from "./config";
 // Politika reddinde API isteği otomatik olarak uygun bir modelde yeniden çalıştırır.
 const FALLBACK = { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const };
 
-let _client: Anthropic | null = null;
-function client() {
-  if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY tanımlı değil (.env)");
-  return (_client ??= new Anthropic());
+async function client() {
+  const c = await cfg();
+  if (!c.anthropicApiKey) throw new Error("Claude API anahtarı girilmemiş (Ayarlar → API anahtarları)");
+  return { api: new Anthropic({ apiKey: c.anthropicApiKey }), model: c.claudeModel };
+}
+
+/** Anahtar testi: hafif bir istek */
+export async function testClaude(): Promise<string> {
+  const { api, model } = await client();
+  const m = await api.models.retrieve(model, {}, { timeout: 15_000, maxRetries: 0 });
+  return `bağlandı (${m.display_name})`;
 }
 
 const LANG_NAMES: Record<string, string> = {
@@ -45,9 +51,10 @@ Rapor ${langName(s.language)} dilinde olsun.`,
     },
   ];
 
+  const { api, model } = await client();
   for (let i = 0; i < 5; i++) {
-    const stream = client().beta.messages.stream({
-      model: MODEL,
+    const stream = api.beta.messages.stream({
+      model,
       max_tokens: 64000,
       output_config: { effort: "medium" },
       tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 8 }],
@@ -83,8 +90,9 @@ export async function generateCalendarChunk(
   count: number,
   avoidTopics: string[],
 ): Promise<CalendarItemT[]> {
-  const res = await client().beta.messages.parse({
-    model: MODEL,
+  const { api, model } = await client();
+  const res = await api.beta.messages.parse({
+    model,
     max_tokens: 16000,
     output_config: { effort: "medium", format: betaZodOutputFormat(CalendarChunk) },
     system: `Sen deneyimli bir YouTube Shorts senaristisin. Bilgilendirici, doğru ve akıcı metinler yazarsın.
@@ -129,8 +137,9 @@ export type ScenePlanT = z.infer<typeof ScenePlan>;
 
 /** 3) Metni sahnelere böler ve her sahne için tutarlı stilde görsel istemi yazar */
 export async function planScenes(s: AppSettings, script: string, topic: string): Promise<ScenePlanT> {
-  const res = await client().beta.messages.parse({
-    model: MODEL,
+  const { api, model } = await client();
+  const res = await api.beta.messages.parse({
+    model,
     max_tokens: 16000,
     output_config: { effort: "low", format: betaZodOutputFormat(ScenePlan) },
     messages: [

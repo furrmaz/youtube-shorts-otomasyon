@@ -3,8 +3,8 @@ import { prisma } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 import { calendarJob } from "@/lib/pipeline";
 import { formatLocal, toLocalInput } from "@/lib/time";
-import { approveAll, deleteItem, saveItem, setStatus, startCalendar } from "../actions";
-import { STATUS_TR } from "../status";
+import { approveAll, deleteItem, saveItem, setStatus, startCalendar } from "@/app/actions";
+import { STATUS_TR } from "@/app/status";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +54,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
 
       {items.length === 0 && <div className="card muted">Henüz içerik yok.</div>}
       {items.map((it) => {
-        const editable = !["PRODUCING", "UPLOADING", "UPLOADED"].includes(it.status);
+        const editable = !["WRITING", "PRODUCING", "UPLOADING", "UPLOADED"].includes(it.status);
         return (
           <details key={it.id} className="card">
             <summary className="row">

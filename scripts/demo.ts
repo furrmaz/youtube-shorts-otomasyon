@@ -22,6 +22,7 @@ async function main() {
       description: "Ahtapotlar hakkında şaşırtıcı bir bilgi. #ahtapot #bilim",
       tags: JSON.stringify(["ahtapot", "bilim"]),
       status: "APPROVED",
+      autoUpload: false,
       // Claude'suz deneme için hazır sahne planı
       scenes: JSON.stringify(
         script.split(/(?<=[.?!])\s+/).map((t) => ({ text: t, imagePrompt: "demo", start: 0, end: 0 })),
