@@ -136,7 +136,14 @@ const ScenePlan = z.object({
 export type ScenePlanT = z.infer<typeof ScenePlan>;
 
 /** 3) Metni sahnelere böler ve her sahne için tutarlı stilde görsel istemi yazar */
-export async function planScenes(s: AppSettings, script: string, topic: string): Promise<ScenePlanT> {
+export async function planScenes(
+  s: AppSettings,
+  script: string,
+  topic: string,
+  opts: { minScenes?: number; maxScenes?: number; characters?: string } = {},
+): Promise<ScenePlanT> {
+  const minS = opts.minScenes ?? 6;
+  const maxS = opts.maxScenes ?? 10;
   const { api, model } = await client();
   const res = await api.beta.messages.parse({
     model,
@@ -145,11 +152,13 @@ export async function planScenes(s: AppSettings, script: string, topic: string):
     messages: [
       {
         role: "user",
-        content: `Aşağıdaki Shorts metnini 6-10 sahneye böl. Sahne metinleri birleştirildiğinde orijinal metnin aynısı olmalı (sırayı ve kelimeleri değiştirme). Her sahne 4-8 saniye sürecek kadar metin içersin.
+        content: `Aşağıdaki Shorts metnini ${minS}-${maxS} sahneye böl. Sahne metinleri birleştirildiğinde orijinal metnin aynısı olmalı (sırayı ve kelimeleri değiştirme). Her sahne 4-8 saniye sürecek kadar metin içersin.
 
 Her sahne için bir görsel istemi yaz. Tüm görseller aynı çizim stilinde olacak:
 "${s.visualStyle}"
 İstemler İngilizce olsun, sadece sahnenin içeriğini anlatsın (stil ayrıca eklenecek), görselde yazı, harf, logo olmasın. Dikey (9:16) kompozisyon düşün, ana öğe ortada.
+Sinematik çekim açılarını çeşitlendir: geniş açı, sürücü koltuğundan bakış, ele yakın çekim (telefon, direksiyon, radyo), karakterin yüzüne yakın çekim, dikiz aynası vb.
+${opts.characters ? `Karakterler sahnede göründüğünde bu tariflere birebir uy (styleAnchor'a da ekle):\n${opts.characters}` : ""}
 
 Konu: ${topic}
 Metin:
@@ -161,4 +170,142 @@ Metin:
   if (res.stop_reason === "refusal") throw new Error("Claude sahne planı isteğini reddetti");
   if (!res.parsed_output?.scenes.length) throw new Error("Sahne planı ayrıştırılamadı");
   return res.parsed_output;
+}
+
+// ---------------- Etkileşimli hikâye dizisi ----------------
+
+export const STORY_VISUAL_STYLE =
+  "minimalist flat 2D vector motion-graphics illustration, simple stylized characters with large round pale heads, small dot eyes, simple brows and thin line limbs, dark navy night color palette, cinematic moody lighting with glowing light sources (red taillights, street lamps, phone and dashboard screens), soft gradients, clean geometric shapes, subtle vignette, no outlines texture";
+
+const SeriesBible = z.object({
+  seriesTitle: z.string().describe("Kısa, akılda kalıcı dizi adı (1-3 kelime)"),
+  premise: z.string().describe("Dizinin dünyası, ana gizem/gerilim, tonu; 4-6 cümle"),
+  characters: z
+    .string()
+    .describe("İngilizce: ana karakterlerin GÖRSEL tarifi (kıyafet rengi, saç, ayırt edici öğe), her biri tek satır; görsel tutarlılık için"),
+});
+
+const Episode = z.object({
+  title: z.string().describe("Bölüm adı, 2-4 kelime (ör. 'Kontağı Kapat')"),
+  script: z.string().describe("Seslendirilecek anlatım metni"),
+  choiceA: z.string().describe("A seçeneği, en fazla 4 kelime, emir kipi (ör. 'Camı aç ve dinle')"),
+  choiceB: z.string().describe("B seçeneği, en fazla 4 kelime"),
+  summary: z.string().describe("Bu bölümde olanların 3-4 cümlelik özeti (devamlılık için)"),
+  description: z.string().describe("YouTube açıklaması: 1-2 cümle merak uyandıran özet + 'Yorumlara A veya B yaz!' + 3-5 hashtag"),
+  tags: z.array(z.string()).describe("8-15 etiket"),
+});
+export type EpisodeT = z.infer<typeof Episode>;
+export type SeriesBibleT = z.infer<typeof SeriesBible>;
+
+/** Dizinin konusu ve karakterleri boşsa Claude oluşturur */
+export async function createSeriesBible(s: AppSettings): Promise<SeriesBibleT> {
+  const { api, model } = await client();
+  const res = await api.beta.messages.parse({
+    model,
+    max_tokens: 8000,
+    output_config: { effort: "medium", format: betaZodOutputFormat(SeriesBible) },
+    messages: [
+      {
+        role: "user",
+        content: `YouTube Shorts için izleyicinin her bölüm sonunda A/B seçimiyle yön verdiği, bölümlü bir gerilim/gizem hikâyesi dizisi tasarla.
+Tür/niş: ${s.niche || "gündelik hayatta geçen gerilim ve gizem"}
+${s.seriesTitle ? `Dizi adı: ${s.seriesTitle}` : ""}
+${s.seriesPremise ? `Kullanıcının fikri: ${s.seriesPremise}` : ""}
+Dil: ${langName(s.language)}
+Görsel stil: ${s.visualStyle}
+Gündelik, tanıdık bir mekânda başlasın (trafik, apartman, gece vardiyası vb.), birinci ağızdan ("sen") anlatılmaya uygun olsun. Ana karakter izleyicinin kendisi.`,
+      },
+    ],
+    ...FALLBACK,
+  });
+  if (res.stop_reason === "refusal") throw new Error("Claude dizi oluşturma isteğini reddetti");
+  if (!res.parsed_output) throw new Error("Dizi bilgisi ayrıştırılamadı");
+  return res.parsed_output;
+}
+
+/** Sıradaki bölümü yazar */
+export async function writeEpisode(
+  s: AppSettings,
+  opts: {
+    episodeNumber: number;
+    previous: { episodeNumber: number; title: string; summary: string; choiceA: string; choiceB: string; chosen?: string | null }[];
+    chosenText?: string; // önceki bölümde izleyicinin seçtiği seçenek
+    topicHint?: string;
+  },
+): Promise<EpisodeT> {
+  const words = Math.round(s.storyMinutes * 150);
+  const { api, model } = await client();
+  const history = opts.previous
+    .map((p) => `Bölüm ${p.episodeNumber} "${p.title}": ${p.summary}\nSeçenekler: A) ${p.choiceA}  B) ${p.choiceB}${p.chosen ? `\nİzleyicinin seçimi: ${p.chosen}` : ""}`)
+    .join("\n\n");
+  const res = await api.beta.messages.parse({
+    model,
+    max_tokens: 16000,
+    output_config: { effort: "medium", format: betaZodOutputFormat(Episode) },
+    system: `Sen YouTube Shorts için etkileşimli gerilim hikâyeleri yazan bir senaristsin.
+Anlatım ikinci tekil şahısla ("sen") ve şimdiki zamanla yapılır; izleyici hikâyenin kahramanıdır.
+Kısa, ritmik, görsel cümleler kur. Saat, mekân, ses gibi somut ayrıntılar ver. Emoji, sahne yönergesi, başlık yazma.
+Kan, şiddet ayrıntısı ve korku pornografisi yok; gerilim atmosferle kurulur.
+Tüm çıktı ${langName(s.language)} dilinde olsun.`,
+    messages: [
+      {
+        role: "user",
+        content: `Dizi: ${s.seriesTitle}
+Konu: ${s.seriesPremise}
+
+${history ? `Önceki bölümler:\n${history}\n` : "Bu dizinin İLK bölümü.\n"}
+${opts.chosenText ? `İzleyiciler önceki bölümün sonunda şunu seçti: "${opts.chosenText}". Bölüm doğrudan bu seçimin sonucuyla başlasın.\n` : ""}
+${opts.topicHint ? `Kullanıcının bu bölüm için isteği: ${opts.topicHint}\n` : ""}
+Bölüm ${opts.episodeNumber}'i yaz:
+- Yaklaşık ${words} kelime (${s.storyMinutes} dakika seslendirme)
+- İlk cümle güçlü bir kanca olsun (saat/mekân/tuhaf bir ayrıntı)
+- Gerilim adım adım artsın, bölüm tam karar anında dursun
+- Metnin son cümleleri seçimi sorsun: "Ne yaparsın? A: ... mı, yoksa B: ... mi? Kararını yorumlara yaz."
+- İki seçenek de makul ve merak uyandırıcı olsun, biri açıkça "doğru" olmasın`,
+      },
+    ],
+    ...FALLBACK,
+  });
+  if (res.stop_reason === "refusal") throw new Error("Claude bölüm yazma isteğini reddetti");
+  if (!res.parsed_output) throw new Error(`Bölüm ayrıştırılamadı (stop_reason=${res.stop_reason})`);
+  return res.parsed_output;
+}
+
+// ---------------- Claude ile sahne çizimi (SVG) ----------------
+
+const SVG_STYLE_GUIDE = `You are an illustrator for a dark, minimal, flat 2D motion-graphics story channel. You draw ONE vertical scene as a single SVG.
+
+Canvas: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">. Fill the whole canvas.
+
+Style rules (keep every scene consistent):
+- Flat vector shapes only: rect, circle, ellipse, path, polygon, line, linearGradient, radialGradient, simple filters (feGaussianBlur for glows). No images, no external references, no <text>, no letters, no numbers, no logos.
+- Night palette: background gradients from #070b16 to #141b2d; mid shapes #1c2538 / #26314a / #33405e; silhouettes #0a0f1c.
+- Light sources glow softly (radialGradient fading to transparent): taillights/danger #e6303b, street lamps/warm #ffd27a, phone/dashboard screens #3fb6ff, neutral highlights #c9d3e6.
+- Characters: large round pale heads (#dfe6f2), two small dark dot eyes, a short thin brow line that shows emotion, no mouth or a tiny line, simple rounded torso in a flat clothing color, thin stroke limbs (stroke-width 10-16, round caps). Keep them simple and readable.
+- Cinematic composition for 9:16: a clear focal point in the middle third, depth with 2-4 layered planes, strong silhouettes, subtle vignette (dark radial gradient at the edges).
+- Keep the SVG compact: at most about 120 elements, reuse gradients via <defs>.
+
+Reply with ONLY the SVG markup, starting with <svg and ending with </svg>. No explanation, no markdown fences.`;
+
+/** Sahneyi Claude'a SVG olarak çizdirir; geçerli <svg>…</svg> döndürür */
+export async function drawSceneSvg(prompt: string, characters?: string): Promise<string> {
+  const { api, model } = await client();
+  const res = await api.beta.messages.create({
+    model,
+    max_tokens: 16000,
+    output_config: { effort: "low" },
+    system: SVG_STYLE_GUIDE,
+    messages: [
+      {
+        role: "user",
+        content: `${characters ? `Recurring characters (draw them exactly like this whenever they appear):\n${characters}\n\n` : ""}Scene to draw:\n${prompt}`,
+      },
+    ],
+    ...FALLBACK,
+  });
+  if (res.stop_reason === "refusal") throw new Error("Claude sahne çizimini reddetti");
+  const text = textOf(res.content);
+  const m = text.match(/<svg[\s\S]*<\/svg>/i);
+  if (!m) throw new Error(`Claude geçerli SVG döndürmedi (stop_reason=${res.stop_reason})`);
+  return m[0];
 }

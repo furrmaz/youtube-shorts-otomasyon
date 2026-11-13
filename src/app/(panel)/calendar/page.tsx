@@ -21,6 +21,13 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <h1>İçerik takvimi</h1>
+      {s.contentFormat === "story" ? (
+        <div className="card">
+          <b>Hikâye dizisi modu:</b> bölümler önceden değil, bir önceki bölümün yorum oylarına göre tek tek yazılır.
+          Otomatik üretim açıksa sıradaki bölüm yayın saatinden {s.produceHoursAhead} saat önce yazılıp üretilir; hemen bir bölüm
+          için Panel&apos;deki <Link href="/">Yeni bölüm üret</Link> butonunu kullanın.
+        </div>
+      ) : (
       <div className="card">
         <form action={startCalendar} className="row">
           <span>Claude nişi araştırsın ve</span>
@@ -38,6 +45,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
           </p>
         )}
       </div>
+      )}
 
       <div className="row" style={{ marginBottom: 12 }}>
         <span className="muted">Filtre:</span>
@@ -60,7 +68,10 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
             <summary className="row">
               <span className={`badge ${it.status}`}>{STATUS_TR[it.status] ?? it.status}</span>
               <b>{it.title}</b>
-              <span className="muted">· Gün {it.dayIndex} · {formatLocal(it.publishAt, s.timezone)}</span>
+              <span className="muted">
+                · {it.episodeNumber != null ? `Bölüm ${it.episodeNumber}` : `Gün ${it.dayIndex}`} · {formatLocal(it.publishAt, s.timezone)}
+                {it.votesA != null && ` · Oylar A ${it.votesA} / B ${it.votesB}`}
+              </span>
             </summary>
             <form action={saveItem} style={{ marginTop: 10 }}>
               <input type="hidden" name="id" value={it.id} />

@@ -44,9 +44,13 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       </div>
 
       <form action={quickVideo} className="card">
-        <h2 style={{ marginTop: 0 }}>Yeni video üret</h2>
+        <h2 style={{ marginTop: 0 }}>{s.contentFormat === "story" ? "Yeni bölüm üret" : "Yeni video üret"}</h2>
         <div className="row">
-          <input name="topic" placeholder="Konu (isteğe bağlı, boşsa Claude nişten seçer)" style={{ flex: 1, minWidth: 220 }} />
+          <input
+            name="topic"
+            placeholder={s.contentFormat === "story" ? "Bu bölüm için not (isteğe bağlı)" : "Konu (isteğe bağlı, boşsa Claude nişten seçer)"}
+            style={{ flex: 1, minWidth: 220 }}
+          />
           <select name="mode" defaultValue="publish" style={{ width: "auto" }}>
             <option value="publish">Üret ve hemen yayınla</option>
             <option value="review">Üret, önce ben bakayım</option>

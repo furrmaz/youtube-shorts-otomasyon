@@ -48,6 +48,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
       <form action={saveSettings} className="card">
         <h2 style={{ marginTop: 0 }}>Kanal ve içerik</h2>
+        <label>Format</label>
+        <select name="contentFormat" defaultValue={s.contentFormat}>
+          <option value="info">Bilgi videosu (45-60 sn, günlük takvim)</option>
+          <option value="story">Etkileşimli hikâye dizisi (bölümler, A/B seçim, yorum oyları)</option>
+        </select>
+        <div className="muted">Formatı değiştirip kaydedince ilgili ayarlar açılır.</div>
         <label>Niş / kategori</label>
         <input name="niche" defaultValue={s.niche} placeholder="ör. uzay ve astronomi gerçekleri, finansal okuryazarlık, tarih" />
         <div className="two">
@@ -62,6 +68,39 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <input name="channelStyle" defaultValue={s.channelStyle} />
           </div>
         </div>
+        {s.contentFormat === "story" && (
+          <div className="card" style={{ background: "#0c0e12", marginTop: 12 }}>
+            <b>Hikâye dizisi</b>
+            <p className="muted" style={{ margin: "4px 0 0" }}>
+              Boş bırakılan alanları Claude ilk bölümde doldurur. Her bölüm A/B seçimiyle biter; sonraki bölüm yorumlarda en çok
+              yazılan seçime göre devam eder.
+            </p>
+            <div className="two">
+              <div>
+                <label>Dizi adı</label>
+                <input name="seriesTitle" defaultValue={s.seriesTitle} placeholder="ör. Son Şerit" />
+              </div>
+              <div>
+                <label>Bölüm süresi (dakika, en fazla 2.8)</label>
+                <input name="storyMinutes" type="number" step="0.1" min={1} max={2.8} defaultValue={s.storyMinutes} />
+              </div>
+            </div>
+            <label>Dizinin konusu</label>
+            <textarea name="seriesPremise" defaultValue={s.seriesPremise} style={{ minHeight: 80 }}
+              placeholder="ör. Gece yarısı kilitlenen bir otoyolda mahsur kalan sürücüler; telsizden gelen tuhaf anonslar…" />
+            <label>Karakterlerin görünüşü (İngilizce, görsel tutarlılık için)</label>
+            <textarea name="seriesCharacters" defaultValue={s.seriesCharacters} style={{ minHeight: 70 }}
+              placeholder="ör. Driver: round pale head, short dark hair, grey hoodie…" />
+          </div>
+        )}
+        {s.contentFormat !== "story" && (
+          <>
+            <input type="hidden" name="seriesTitle" value={s.seriesTitle} />
+            <input type="hidden" name="seriesPremise" value={s.seriesPremise} />
+            <input type="hidden" name="seriesCharacters" value={s.seriesCharacters} />
+            <input type="hidden" name="storyMinutes" value={s.storyMinutes} />
+          </>
+        )}
         <label>Görsel stil (tüm sahnelerde aynı, İngilizce önerilir)</label>
         <textarea name="visualStyle" defaultValue={s.visualStyle} style={{ minHeight: 70 }} />
 
@@ -96,10 +135,31 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <div>
             <label>Görsel sağlayıcı</label>
             <select name="imageProvider" defaultValue={s.imageProvider}>
+              <option value="claude">Claude çizimi (vektör, ek anahtar gerekmez)</option>
               <option value="fal">fal.ai (Flux)</option>
               <option value="replicate">Replicate (Flux)</option>
               <option value="mock">Deneme (degrade, anahtar gerekmez)</option>
             </select>
+          </div>
+        </div>
+
+        <div className="two">
+          <div>
+            <label>Altyazı</label>
+            <select name="subtitleStyle" defaultValue={s.subtitleStyle}>
+              <option value="karaoke">Büyük, kelime kelime vurgulu</option>
+              <option value="minimal">Sade, alt kısımda</option>
+              <option value="off">Kapalı</option>
+            </select>
+          </div>
+          <div>
+            <label>Filigran (ör. kanal adı, boşsa yok)</label>
+            <input name="watermark" defaultValue={s.watermark} placeholder="@kanaladi" />
+          </div>
+          <div>
+            <label>Arka plan müziği seviyesi (0 = kapalı, 0.12 önerilir)</label>
+            <input name="musicVolume" type="number" step="0.01" min={0} max={1} defaultValue={s.musicVolume} />
+            <div className="muted">Proje klasöründeki <code>music</code> klasörüne koyduğunuz mp3&apos;lerden biri rastgele seçilir.</div>
           </div>
         </div>
 

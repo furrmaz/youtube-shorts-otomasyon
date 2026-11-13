@@ -102,3 +102,32 @@ export async function uploadShort(opts: {
   if (!res.data.id) throw new Error("YouTube video ID döndürmedi");
   return res.data.id;
 }
+
+/** Bölüm yorumlarındaki A/B oylarını sayar (her yorumcu bir kez) */
+export async function countVotes(videoId: string): Promise<{ a: number; b: number }> {
+  const auth = await authedClient();
+  const yt = google.youtube({ version: "v3", auth });
+  const voters = new Map<string, "A" | "B">();
+  let pageToken: string | undefined;
+  for (let page = 0; page < 10; page++) {
+    const res = await yt.commentThreads.list({
+      part: ["snippet"], videoId, maxResults: 100, pageToken, textFormat: "plainText",
+    });
+    for (const t of res.data.items ?? []) {
+      const c = t.snippet?.topLevelComment?.snippet;
+      const text = (c?.textOriginal ?? c?.textDisplay ?? "").trim();
+      // "A", "a!", "A şıkkı", "Bence B" gibi yorumlar; ikisini birden içerenler sayılmaz
+      const hasA = /(^|[^\p{L}])a([^\p{L}]|$)/iu.test(text);
+      const hasB = /(^|[^\p{L}])b([^\p{L}]|$)/iu.test(text);
+      if (hasA === hasB) continue;
+      const who = c?.authorChannelId?.value ?? c?.authorDisplayName ?? Math.random().toString();
+      voters.set(who, hasA ? "A" : "B");
+    }
+    pageToken = res.data.nextPageToken ?? undefined;
+    if (!pageToken) break;
+  }
+  let a = 0;
+  let b = 0;
+  for (const v of voters.values()) v === "A" ? a++ : b++;
+  return { a, b };
+}
