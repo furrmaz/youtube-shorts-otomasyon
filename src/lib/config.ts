@@ -7,7 +7,8 @@ export async function cfg() {
   return {
     panelPassword: pick(s.panelPassword, process.env.PANEL_PASSWORD),
     anthropicApiKey: pick(s.anthropicApiKey, process.env.ANTHROPIC_API_KEY),
-    claudeModel: pick(s.claudeModel, process.env.CLAUDE_MODEL, "claude-opus-5-5"),
+    // "claude-opus-5.5" gibi noktalı yazımlar API kimliğine (tireli) çevrilir
+    claudeModel: pick(s.claudeModel, process.env.CLAUDE_MODEL, "claude-opus-5-5").toLowerCase().replace(/[.\s]+/g, "-"),
     elevenApiKey: pick(s.elevenApiKey, process.env.ELEVENLABS_API_KEY),
     elevenModelId: pick(s.elevenModelId, process.env.ELEVENLABS_MODEL_ID, "eleven_multilingual_v2"),
     falKey: pick(s.falKey, process.env.FAL_KEY),
