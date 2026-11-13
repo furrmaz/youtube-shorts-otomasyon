@@ -135,7 +135,7 @@ export async function produceItem(id: string) {
             maxScenes: Math.max(14, Math.round(s.storyMinutes * 9)),
             characters: s.seriesCharacters,
           })
-        : await planScenes(s, item.script, item.topic);
+        : await planScenes(s, item.script, item.topic, { minScenes: 9, maxScenes: 13 });
       const styled = plan.scenes.map((sc) => ({
         text: sc.text,
         imagePrompt: `${s.visualStyle}. ${plan.styleAnchor}. ${sc.imagePrompt}. Vertical 9:16 composition, no text, no letters, no watermark.`,

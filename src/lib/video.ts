@@ -41,6 +41,9 @@ function zoompanFor(i: number, frames: number, motion: Motion) {
   }
 }
 
+// Shorts için yaygın ses seviyesi (~-14 LUFS); ElevenLabs çıktısı -23 civarında kalıyordu
+const LOUD = "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000";
+
 function assTime(t: number) {
   const cs = Math.max(0, Math.round(t * 100));
   const h = Math.floor(cs / 360000);
@@ -111,10 +114,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     }
     if (g.length) groups.push(g);
     const titleEnd = o.titleCard ? 3.2 : 0;
-    for (const grp of groups) {
+    groups.forEach((grp, gi) => {
+      // Bir sonraki grup başlamadan biter; çakışan satırlar üst üste binmez
+      const nextStart = gi + 1 < groups.length ? groups[gi + 1][0].start : Infinity;
       if (style === "karaoke") {
         grp.forEach((w, i) => {
-          const end = i + 1 < grp.length ? grp[i + 1].start : w.end + 0.15;
+          const end = i + 1 < grp.length ? grp[i + 1].start : Math.min(w.end + 0.15, nextStart);
           const text = grp
             .map((x, j) => (j === i ? `{\\c&H00E6FF&\\fscx110\\fscy110}${upper(x.word)}{\\c&HFFFFFF&\\fscx100\\fscy100}` : upper(x.word)))
             .join(" ");
@@ -122,10 +127,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         });
       } else {
         const a = Math.max(grp[0].start, titleEnd);
-        const b = Math.min(grp.at(-1)!.end + 0.2, subEnd);
+        const b = Math.min(grp.at(-1)!.end + 0.2, nextStart, subEnd);
         if (b > a) ev(1, a, b, "Minimal", grp.map((x) => clean(x.word)).join(" "));
       }
-    }
+    });
   }
 
   // Açılış kartı: dizi adı + kırmızı bölüm etiketi
@@ -227,9 +232,9 @@ export async function renderVideo(opts: {
   const extra: string[] = ["-i", audioPath];
   if (music) {
     extra.push("-stream_loop", "-1", "-i", music);
-    filters.push(`[${audioIdx}:a]apad[voice];[${audioIdx + 1}:a]volume=${opts.musicVolume}[bg];[voice][bg]amix=inputs=2:duration=first:normalize=0[a]`);
+    filters.push(`[${audioIdx}:a]apad[voice];[${audioIdx + 1}:a]volume=${opts.musicVolume}[bg];[voice][bg]amix=inputs=2:duration=first:normalize=0,${LOUD}[a]`);
   } else {
-    filters.push(`[${audioIdx}:a]apad[a]`);
+    filters.push(`[${audioIdx}:a]apad,${LOUD}[a]`);
   }
 
   await ffmpeg([

@@ -152,7 +152,7 @@ export async function planScenes(
     messages: [
       {
         role: "user",
-        content: `Aşağıdaki Shorts metnini ${minS}-${maxS} sahneye böl. Sahne metinleri birleştirildiğinde orijinal metnin aynısı olmalı (sırayı ve kelimeleri değiştirme). Her sahne 4-8 saniye sürecek kadar metin içersin.
+        content: `Aşağıdaki Shorts metnini ${minS}-${maxS} sahneye böl. Sahne metinleri birleştirildiğinde orijinal metnin aynısı olmalı (sırayı ve kelimeleri değiştirme). Her sahne 3-7 saniye sürecek kadar metin içersin; izleyici sıkılmasın diye görüntü sık değişsin.
 
 Her sahne için bir görsel istemi yaz. Tüm görseller aynı çizim stilinde olacak:
 "${s.visualStyle}"
@@ -283,6 +283,9 @@ Style rules (keep every scene consistent):
 - Light sources glow softly (radialGradient fading to transparent): taillights/danger #e6303b, street lamps/warm #ffd27a, phone/dashboard screens #3fb6ff, neutral highlights #c9d3e6.
 - Characters: large round pale heads (#dfe6f2), two small dark dot eyes, a short thin brow line that shows emotion, no mouth or a tiny line, simple rounded torso in a flat clothing color, thin stroke limbs (stroke-width 10-16, round caps). Keep them simple and readable.
 - Cinematic composition for 9:16: a clear focal point in the middle third, depth with 2-4 layered planes, strong silhouettes, subtle vignette (dark radial gradient at the edges).
+- Safe areas: the camera slowly zooms and pans, so keep every important element (faces, hands, key objects) inside x 140-940 and y 220-1700. Never crop a head or hat at the canvas edge.
+- Subtitles are burned in over the band y 1180-1480: keep faces and the focal object out of that band (place them above it, roughly y 350-1150); background, floor or bodies may pass behind it.
+- Make each scene clearly different from the previous ones in camera angle and framing (wide, close-up, over-the-shoulder, detail shot), and include a few small details (props, windows, stars, steam, papers) so the frame doesn't feel empty.
 - Keep the SVG compact: at most about 120 elements, reuse gradients via <defs>.
 
 Reply with ONLY the SVG markup, starting with <svg and ending with </svg>. No explanation, no markdown fences.`;
