@@ -6,7 +6,32 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { itemDir } from "../src/lib/paths";
 
+async function story() {
+  const script =
+    "Saat on biri kırk üç geçiyor. Kuzey çevre yolundasın ve önündeki kırmızı stop lambaları kilometrelerce uzanıyor. " +
+    "Telefonun haritası kıpkırmızı. Radyoyu açıyorsun, sadece cızırtı var. Sonra bir ses: trafik yoğunluğu nedeniyle lütfen araçlarınızdan inmeyin. " +
+    "Dikiz aynasına bakıyorsun. Arkandaki aracın farları sönük ama içinde biri var, seni izliyor. " +
+    "Birden camına iki kez vuruluyor. Dışarıda tanımadığın bir adam, bir şey söylemek istiyor. " +
+    "Ne yaparsın? A: camı açıp dinler misin, yoksa B: sessiz kalıp bekler misin? Kararını yorumlara yaz.";
+  const item = await prisma.contentItem.create({
+    data: {
+      dayIndex: 1, episodeNumber: 1, publishAt: new Date(Date.now() + 86400_000),
+      topic: "Kontağı Kapat", hook: "Saat on biri kırk üç geçiyor.", script,
+      title: "Son Şerit - Bölüm 1: Kontağı Kapat", description: "Yorumlara A veya B yaz!",
+      tags: "[]", status: "APPROVED", autoUpload: false,
+      choiceA: "Camı aç ve dinle", choiceB: "Sessiz kal ve bekle",
+      scenes: JSON.stringify(script.split(/(?<=[.?!:])\s+/).map((t) => ({ text: t, imagePrompt: "demo", start: 0, end: 0 }))),
+    },
+  });
+  await prisma.settings.update({ where: { id: 1 }, data: { seriesTitle: "Son Şerit", subtitleStyle: "minimal", watermark: "@kanaladi" } });
+  await produceItem(item.id);
+  const done = await prisma.contentItem.findUniqueOrThrow({ where: { id: item.id } });
+  console.log("Durum:", done.status, done.error ?? "", done.videoPath ?? "");
+  await prisma.$disconnect();
+}
+
 async function main() {
+  if (process.argv.includes("story")) return story();
   const script =
     "Ahtapotların üç kalbi olduğunu biliyor muydun? İkisi kanı solungaçlara pompalar, üçüncüsü ise vücudun geri kalanına. " +
     "Üstelik kanları kırmızı değil, mavidir. Bunun sebebi oksijeni taşıyan molekülün demir yerine bakır içermesidir. " +

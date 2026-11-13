@@ -4,11 +4,11 @@ import { prisma } from "./db";
 import { getSettings } from "./settings";
 import { log } from "./log";
 import { itemDir, exists } from "./paths";
-import { planScenes, researchNiche, generateCalendarChunk } from "./claude";
+import { planScenes, researchNiche, generateCalendarChunk, createSeriesBible, writeEpisode } from "./claude";
 import { synthesize, type Word } from "./tts";
 import { generateImage } from "./images";
 import { renderVideo, timeScenes, type Scene } from "./video";
-import { uploadShort } from "./youtube";
+import { uploadShort, countVotes } from "./youtube";
 import { addDaysYmd, parsePublishTimes, ymdInTz, zonedToUtc } from "./time";
 
 /** API hatalarını anlaşılır Türkçe mesaja çevirir */
@@ -33,6 +33,8 @@ export async function generateCalendar(days = 30) {
   const job: CalendarJob = (g.__calendarJob = { running: true, startedAt: new Date(), message: "Araştırma yapılıyor" });
   try {
     const s = await getSettings();
+    if (s.contentFormat === "story")
+      throw new Error("Hikâye dizisi modunda bölümler izleyici oylarına göre tek tek yazılır; Panel'den 'Yeni video üret' kullanın");
     if (!s.niche.trim()) throw new Error("Önce Ayarlar'dan niş/kategori girin");
     const times = parsePublishTimes(s.publishTimes).slice(0, Math.max(1, s.videosPerDay));
     while (times.length < s.videosPerDay) times.push(times.at(-1)!);
@@ -102,6 +104,7 @@ export async function produceItem(id: string) {
     const s = await getSettings();
     const item = await prisma.contentItem.findUniqueOrThrow({ where: { id } });
     const dir = await itemDir(id);
+    const isStory = item.episodeNumber != null;
     await log("Üretim başladı", { itemId: id });
 
     // 1) Ses + kelime zamanları
@@ -118,7 +121,7 @@ export async function produceItem(id: string) {
       await fs.writeFile(wordsPath, JSON.stringify({ words, duration }));
       await log(`Seslendirme hazır (${duration.toFixed(1)} sn, ${s.ttsProvider})`, { itemId: id });
     }
-    if (duration > 62) await log(`Uyarı: ses ${duration.toFixed(0)} sn, 60 sn üstü`, { itemId: id, level: "warn" });
+    if (duration > (isStory ? 175 : 62)) await log(`Uyarı: ses ${duration.toFixed(0)} sn, 60 sn üstü`, { itemId: id, level: "warn" });
 
     // 2) Sahne planı (görsel istemleri)
     let scenes: Scene[];
@@ -126,7 +129,13 @@ export async function produceItem(id: string) {
     if (existing?.length) {
       scenes = timeScenes(existing, words, duration).map((sc, i) => ({ ...sc, image: existing[i].image }));
     } else {
-      const plan = await planScenes(s, item.script, item.topic);
+      const plan = isStory
+        ? await planScenes(s, item.script, item.topic, {
+            minScenes: Math.max(10, Math.round(s.storyMinutes * 6)),
+            maxScenes: Math.max(14, Math.round(s.storyMinutes * 9)),
+            characters: s.seriesCharacters,
+          })
+        : await planScenes(s, item.script, item.topic);
       const styled = plan.scenes.map((sc) => ({
         text: sc.text,
         imagePrompt: `${s.visualStyle}. ${plan.styleAnchor}. ${sc.imagePrompt}. Vertical 9:16 composition, no text, no letters, no watermark.`,
@@ -149,7 +158,25 @@ export async function produceItem(id: string) {
 
     // 4) Montaj
     const outPath = path.join(dir, "short.mp4");
-    await renderVideo({ dir, scenes, audioPath, words, outPath });
+    await renderVideo({
+      dir, scenes, audioPath, words, outPath,
+      motion: isStory ? "slow" : "normal",
+      transition: isStory ? "fade" : "varied",
+      endCardSeconds: isStory && item.choiceA ? 5 : 0,
+      musicVolume: s.musicVolume,
+      overlays: {
+        subtitleStyle: s.subtitleStyle as "karaoke" | "minimal" | "off",
+        watermark: s.watermark,
+        ...(isStory
+          ? {
+              titleCard: { title: s.seriesTitle || "Hikâye", badge: `Bölüm ${item.episodeNumber} · ${item.topic}` },
+              ...(item.choiceA && item.choiceB
+                ? { endCard: { choiceA: item.choiceA, choiceB: item.choiceB, start: 0, end: 0 } }
+                : {}),
+            }
+          : {}),
+      },
+    });
     await prisma.contentItem.update({
       where: { id },
       data: { status: "READY", audioPath, videoPath: outPath, scenes: JSON.stringify(scenes) },
@@ -198,6 +225,8 @@ export async function tick() {
   const now = Date.now();
   const yt = await prisma.youtubeAccount.findUnique({ where: { id: 1 } });
 
+  if (s.autoProduce && s.contentFormat === "story") await ensureNextEpisode(s.timezone);
+
   if (s.autoProduce) {
     const due = await prisma.contentItem.findMany({
       where: { status: "APPROVED", publishAt: { lte: new Date(now + s.produceHoursAhead * 3600_000) } },
@@ -228,6 +257,20 @@ export async function tick() {
  * `publishNow` ise hemen YouTube'a yüklenir; değilse "Hazır"da bekler.
  */
 export async function createQuickVideo(opts: { topicHint: string; publishNow: boolean }): Promise<string> {
+  const st = await getSettings();
+  if (st.contentFormat === "story") {
+    const id = await startEpisode({ publishAt: new Date(), autoUpload: opts.publishNow, topicHint: opts.topicHint });
+    void (async () => {
+      await finishEpisode(id, opts.topicHint);
+      const it = await prisma.contentItem.findUnique({ where: { id } });
+      if (it?.status !== "APPROVED") return;
+      await produceItem(id);
+      const after = await prisma.contentItem.findUniqueOrThrow({ where: { id } });
+      if (opts.publishNow && after.status === "READY" && (await prisma.youtubeAccount.findUnique({ where: { id: 1 } })))
+        await uploadItem(id);
+    })();
+    return id;
+  }
   const item = await prisma.contentItem.create({
     data: {
       dayIndex: 0,
@@ -282,4 +325,141 @@ async function runQuickVideo(id: string, topicHint: string, publishNow: boolean)
     });
     await log(`Yeni video hatası: ${explain(e)}`, { itemId: id, level: "error" });
   }
+}
+
+// ---------------- Hikâye dizisi ----------------
+
+/** Bölüm için yer tutucu kayıt oluşturur (metin arka planda yazılır) */
+async function startEpisode(opts: { publishAt: Date; autoUpload: boolean; topicHint?: string }) {
+  const last = await prisma.contentItem.findFirst({ where: { episodeNumber: { not: null } }, orderBy: { episodeNumber: "desc" } });
+  const n = (last?.episodeNumber ?? 0) + 1;
+  const item = await prisma.contentItem.create({
+    data: {
+      dayIndex: n,
+      episodeNumber: n,
+      publishAt: opts.publishAt,
+      topic: `Bölüm ${n}`,
+      hook: "",
+      script: "",
+      title: `Bölüm ${n} (yazılıyor…)`,
+      description: "",
+      tags: "[]",
+      status: "WRITING",
+      autoUpload: opts.autoUpload,
+    },
+  });
+  return item.id;
+}
+
+/** Dizi bilgisini hazırlar, önceki bölümün oylarını sayar ve bölümü yazar */
+async function finishEpisode(id: string, topicHint = "") {
+  try {
+    let s = await getSettings();
+    if (!s.seriesPremise.trim() || !s.seriesCharacters.trim() || !s.seriesTitle.trim()) {
+      await log("Dizi konusu ve karakterler oluşturuluyor", { itemId: id });
+      const bible = await createSeriesBible(s);
+      s = await prisma.settings.update({
+        where: { id: 1 },
+        data: {
+          seriesTitle: s.seriesTitle.trim() || bible.seriesTitle,
+          seriesPremise: s.seriesPremise.trim() || bible.premise,
+          seriesCharacters: s.seriesCharacters.trim() || bible.characters,
+        },
+      });
+    }
+    const item = await prisma.contentItem.findUniqueOrThrow({ where: { id } });
+    const previous = await prisma.contentItem.findMany({
+      where: { episodeNumber: { not: null, lt: item.episodeNumber! }, summary: { not: null } },
+      orderBy: { episodeNumber: "asc" },
+    });
+
+    // Önceki bölümün oyları
+    let chosenText: string | undefined;
+    let chosen: string | null = null;
+    const last = previous.at(-1);
+    if (last?.choiceA && last.choiceB) {
+      let a = last.votesA ?? 0;
+      let b = last.votesB ?? 0;
+      if (last.youtubeVideoId && (await prisma.youtubeAccount.findUnique({ where: { id: 1 } }))) {
+        try {
+          ({ a, b } = await countVotes(last.youtubeVideoId));
+          await prisma.contentItem.update({ where: { id: last.id }, data: { votesA: a, votesB: b } });
+        } catch (e) {
+          await log(`Oylar okunamadı: ${(e as Error).message}`, { itemId: id, level: "warn" });
+        }
+      }
+      if (a !== b) {
+        chosen = a > b ? "A" : "B";
+        chosenText = a > b ? last.choiceA : last.choiceB;
+        await log(`Bölüm ${last.episodeNumber} oyları: A ${a} · B ${b} → ${chosen}: ${chosenText}`, { itemId: id });
+      } else {
+        await log(`Bölüm ${last.episodeNumber} oyları berabere (A ${a} · B ${b}); hikâyeye en uygun seçenek seçilecek`, { itemId: id });
+      }
+    }
+
+    const ep = await writeEpisode(s, {
+      episodeNumber: item.episodeNumber!,
+      previous: previous.slice(-6).map((p) => ({
+        episodeNumber: p.episodeNumber!, title: p.topic, summary: p.summary!, choiceA: p.choiceA ?? "", choiceB: p.choiceB ?? "", chosen: p.id === last?.id ? chosenText : p.chosen,
+      })),
+      chosenText,
+      topicHint,
+    });
+    const series = s.seriesTitle || "Hikâye";
+    await prisma.contentItem.update({
+      where: { id },
+      data: {
+        topic: ep.title,
+        hook: ep.script.split(/(?<=[.!?])\s+/)[0] ?? "",
+        script: ep.script,
+        title: `${series} - Bölüm ${item.episodeNumber}: ${ep.title}`.slice(0, 90),
+        description: ep.description,
+        tags: JSON.stringify(ep.tags),
+        choiceA: ep.choiceA,
+        choiceB: ep.choiceB,
+        summary: ep.summary,
+        chosen: chosenText ? `${chosen}: ${chosenText}` : null,
+        status: "APPROVED",
+      },
+    });
+    await log(`Bölüm ${item.episodeNumber} yazıldı: ${ep.title}`, { itemId: id });
+  } catch (e) {
+    await prisma.contentItem.update({
+      where: { id },
+      data: { status: "FAILED", error: explain(e), title: (await prisma.contentItem.findUnique({ where: { id } }))?.title.replace(" (yazılıyor…)", "") },
+    });
+    await log(`Bölüm yazılamadı: ${explain(e)}`, { itemId: id, level: "error" });
+  }
+}
+
+/**
+ * Otomatik mod: sıradaki yayın saatine `produceHoursAhead` saat kala bir sonraki bölümü yazar.
+ * Önceki bölüm yayınlanmadan yenisi yazılmaz (oyların toplanabilmesi için).
+ */
+async function ensureNextEpisode(tz: string) {
+  const s = await getSettings();
+  const pending = await prisma.contentItem.count({
+    where: { episodeNumber: { not: null }, status: { in: ["WRITING", "DRAFT", "APPROVED", "PRODUCING", "READY", "UPLOADING"] } },
+  });
+  if (pending > 0) return;
+  const last = await prisma.contentItem.findFirst({ where: { episodeNumber: { not: null } }, orderBy: { episodeNumber: "desc" } });
+  if (last?.status === "FAILED") return; // hata çözülene kadar bekle
+  if (last && last.publishAt.getTime() > Date.now()) return; // önceki bölüm henüz yayında değil
+
+  const now = Date.now();
+  const times = parsePublishTimes(s.publishTimes).slice(0, Math.max(1, s.videosPerDay));
+  const today = ymdInTz(new Date(), tz);
+  let next: Date | null = null;
+  for (let d = 0; d < 3 && !next; d++) {
+    for (const t of times) {
+      const at = zonedToUtc(addDaysYmd(today, d), t, tz);
+      if (at.getTime() > now + 30 * 60_000) {
+        next = at;
+        break;
+      }
+    }
+  }
+  if (!next || next.getTime() - now > s.produceHoursAhead * 3600_000) return;
+  const id = await startEpisode({ publishAt: next, autoUpload: true });
+  await finishEpisode(id);
 }

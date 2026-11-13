@@ -91,6 +91,16 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
         </div>
       )}
 
+      {it.choiceA && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Bölüm {it.episodeNumber} seçimleri</h2>
+          {it.chosen && <p className="muted">Bu bölüm önceki seçimle başladı: {it.chosen}</p>}
+          <p><b>A:</b> {it.choiceA} {it.votesA != null && <span className="muted">({it.votesA} oy)</span>}</p>
+          <p><b>B:</b> {it.choiceB} {it.votesB != null && <span className="muted">({it.votesB} oy)</span>}</p>
+          {it.summary && <p className="muted">Özet: {it.summary}</p>}
+        </div>
+      )}
+
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Metin</h2>
         <p style={{ whiteSpace: "pre-wrap" }}>{it.script}</p>

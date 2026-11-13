@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { createQuickVideo, generateCalendar, produceItem, uploadItem } from "@/lib/pipeline";
 import { requireAuth, setAuthCookie } from "@/lib/auth";
 import { cfg } from "@/lib/config";
-import { testClaude } from "@/lib/claude";
+import { testClaude, STORY_VISUAL_STYLE } from "@/lib/claude";
 import { itemDir } from "@/lib/paths";
 import { getSettings } from "@/lib/settings";
 import { zonedToUtc } from "@/lib/time";
@@ -30,7 +30,21 @@ export async function saveSettings(f: FormData) {
     ttsProvider: str(f, "ttsProvider") || "mock",
     autoProduce: f.get("autoProduce") === "on",
     produceHoursAhead: Math.max(1, Number(str(f, "produceHoursAhead")) || 6),
+    contentFormat: str(f, "contentFormat") === "story" ? "story" : "info",
+    seriesTitle: str(f, "seriesTitle"),
+    seriesPremise: str(f, "seriesPremise"),
+    seriesCharacters: str(f, "seriesCharacters"),
+    storyMinutes: Math.min(2.8, Math.max(1, Number(str(f, "storyMinutes").replace(",", ".")) || 2.5)),
+    subtitleStyle: ["karaoke", "minimal", "off"].includes(str(f, "subtitleStyle")) ? str(f, "subtitleStyle") : "karaoke",
+    watermark: str(f, "watermark"),
+    musicVolume: Math.min(1, Math.max(0, Number(str(f, "musicVolume").replace(",", ".")) || 0)),
   };
+  // Hikâye moduna ilk geçişte örnek videodaki görsel dili ve sade altyazıyı varsayılan yap
+  const prev = await prisma.settings.findUnique({ where: { id: 1 } });
+  if (data.contentFormat === "story" && prev?.contentFormat !== "story") {
+    if (!data.visualStyle || data.visualStyle.startsWith("flat 2D hand-drawn illustration")) data.visualStyle = STORY_VISUAL_STYLE;
+    if (data.subtitleStyle === "karaoke") data.subtitleStyle = "minimal";
+  }
   await prisma.settings.upsert({ where: { id: 1 }, update: data, create: { id: 1, ...data } });
   revalidatePath("/", "layout");
   redirect("/settings?saved=1");

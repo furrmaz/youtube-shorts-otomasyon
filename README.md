@@ -78,6 +78,17 @@ Anahtar olmadan da her şey denenebilir: Ayarlar'da ses ve görsel sağlayıcıs
 >
 > Varsayılan API kotası günde 10.000 birimdir; her yükleme yaklaşık 1.600 birim harcar, yani günde ~6 video.
 
+## Etkileşimli hikâye dizisi modu
+
+Ayarlar → Format → **Etkileşimli hikâye dizisi**. Bu modda:
+
+- Claude dizinin adını, konusunu ve karakterlerin görünüşünü oluşturur (isterseniz kendiniz yazın).
+- Her bölüm 2-3 dakikalık, "sen" diliyle anlatılan bir gerilim hikâyesidir ve **A/B seçimiyle** biter.
+- Video koyu, sade 2D çizim stilinde; açılışta dizi adı + bölüm kartı, sonda "Şimdi karar senin" seçim ekranı vardır.
+- Sıradaki bölüm, önceki bölümün YouTube yorumlarında en çok yazılan seçime (A/B) göre yazılır. Berabere ya da oy yoksa Claude hikâyeye en uygun olanı seçer.
+- Otomatik modda bir bölüm yayınlanmadan yenisi yazılmaz; yeni bölüm yayın saatinden `produceHoursAhead` saat önce yazılıp üretilir.
+- Arka plan müziği için proje klasöründe `music` klasörü açıp telifsiz mp3 koyun (YouTube Ses Kitaplığı'ndan indirilebilir).
+
 ## Nasıl çalışır
 
 - **Ayarlar**: niş, dil, kanal tonu, görsel stil, ElevenLabs ses ID, günde kaç video, yayın saatleri, saat dilimi, gizlilik.

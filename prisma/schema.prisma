@@ -36,6 +36,15 @@ model Settings {
   googleClientId     String  @default("")
   googleClientSecret String  @default("")
   appUrl             String  @default("")
+  // Format: "info" (bilgi videosu) | "story" (etkileşimli hikâye dizisi)
+  contentFormat      String  @default("info")
+  seriesTitle        String  @default("")
+  seriesPremise      String  @default("") // dizinin konusu/dünyası (boşsa Claude ilk bölümde oluşturur)
+  seriesCharacters   String  @default("") // karakterlerin görsel tarifi (İngilizce, görsel tutarlılık için)
+  storyMinutes       Float   @default(2.5)
+  subtitleStyle      String  @default("karaoke") // karaoke | minimal | off
+  watermark          String  @default("")
+  musicVolume        Float   @default(0.12) // music/ klasöründeki mp3'ler için
   updatedAt         DateTime @updatedAt
 }
 
@@ -68,6 +77,14 @@ model ContentItem {
   error          String?
   attempts       Int       @default(0)
   autoUpload     Boolean   @default(true) // false: hazır olunca bekler, elle yüklenir
+  // Hikâye dizisi alanları
+  episodeNumber  Int?
+  choiceA        String?
+  choiceB        String?
+  summary        String?   // bölüm özeti (sonraki bölümlerin devamlılığı için)
+  votesA         Int?
+  votesB         Int?
+  chosen         String?   // bu bölümü başlatan, önceki bölümde seçilen seçenek
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   logs           JobLog[]
