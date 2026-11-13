@@ -4,7 +4,7 @@ Bir niş seçersiniz; panel Claude ile nişi araştırır, 30 günlük içerik t
 
 1. **ElevenLabs** metni seslendirir (kelime kelime zamanlamayla)
 2. **Claude** metni 6-10 sahneye böler ve hepsi aynı çizim stilinde olacak görsel istemleri yazar
-3. **Görsel modeli** (fal.ai Flux veya Replicate Flux) sahneleri çizer
+3. **Görseller**: Claude sahneleri vektör çizim (SVG) olarak çizer (ek anahtar gerekmez) ya da fal.ai / Replicate Flux kullanılır
 4. **FFmpeg** 1080x1920 dikey video hazırlar: Ken Burns yakınlaşma/kaydırma, sahne geçişleri, kelime kelime vurgulu altyazı
 5. **YouTube Data API** videoyu Shorts olarak yükler; ileri tarihliyse YouTube'un kendi zamanlamasıyla yayınlanır
 
@@ -60,7 +60,7 @@ Tüm anahtarlar ve ayarlar panelden girilir: **Ayarlar → API anahtarları**. A
 |---|---|
 | Claude | console.anthropic.com → API Keys |
 | ElevenLabs | elevenlabs.io → Settings → API Keys |
-| fal.ai veya Replicate | fal.ai/dashboard/keys veya replicate.com/account/api-tokens |
+| fal.ai veya Replicate (isteğe bağlı; "Claude çizimi" seçiliyse gerekmez) | fal.ai/dashboard/keys veya replicate.com/account/api-tokens |
 | Google Client ID / Secret | Aşağıdaki adımlar |
 
 Panel şifresi isteğe bağlıdır; boşsa panel şifresiz açılır (sadece kendi bilgisayarınızda önerilir). İsterseniz anahtarları `.env` ile de verebilirsiniz; panelde girilen değer önceliklidir.
@@ -104,7 +104,7 @@ Ayarlar → Format → **Etkileşimli hikâye dizisi**. Bu modda:
 ```
 src/lib/claude.ts    Araştırma (web arama), takvim ve sahne planı (yapılandırılmış çıktı)
 src/lib/tts.ts       ElevenLabs (with-timestamps) + deneme sağlayıcısı
-src/lib/images.ts    Görsel sağlayıcıları: fal, replicate, mock (yenisini eklemek kolay)
+src/lib/images.ts    Görsel sağlayıcıları: claude (SVG çizim), fal, replicate, mock (yenisini eklemek kolay)
 src/lib/video.ts     Sahne zamanlama, Ken Burns klipleri, geçişler, ASS altyazı, montaj
 src/lib/youtube.ts   OAuth ve yükleme
 src/lib/pipeline.ts  Takvim üretimi, üretim, yükleme, zamanlayıcı turu

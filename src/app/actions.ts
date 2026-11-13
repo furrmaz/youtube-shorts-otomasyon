@@ -44,6 +44,7 @@ export async function saveSettings(f: FormData) {
   if (data.contentFormat === "story" && prev?.contentFormat !== "story") {
     if (!data.visualStyle || data.visualStyle.startsWith("flat 2D hand-drawn illustration")) data.visualStyle = STORY_VISUAL_STYLE;
     if (data.subtitleStyle === "karaoke") data.subtitleStyle = "minimal";
+    if (data.imageProvider === "mock") data.imageProvider = "claude";
   }
   await prisma.settings.upsert({ where: { id: 1 }, update: data, create: { id: 1, ...data } });
   revalidatePath("/", "layout");

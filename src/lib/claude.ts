@@ -270,3 +270,42 @@ Bölüm ${opts.episodeNumber}'i yaz:
   if (!res.parsed_output) throw new Error(`Bölüm ayrıştırılamadı (stop_reason=${res.stop_reason})`);
   return res.parsed_output;
 }
+
+// ---------------- Claude ile sahne çizimi (SVG) ----------------
+
+const SVG_STYLE_GUIDE = `You are an illustrator for a dark, minimal, flat 2D motion-graphics story channel. You draw ONE vertical scene as a single SVG.
+
+Canvas: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">. Fill the whole canvas.
+
+Style rules (keep every scene consistent):
+- Flat vector shapes only: rect, circle, ellipse, path, polygon, line, linearGradient, radialGradient, simple filters (feGaussianBlur for glows). No images, no external references, no <text>, no letters, no numbers, no logos.
+- Night palette: background gradients from #070b16 to #141b2d; mid shapes #1c2538 / #26314a / #33405e; silhouettes #0a0f1c.
+- Light sources glow softly (radialGradient fading to transparent): taillights/danger #e6303b, street lamps/warm #ffd27a, phone/dashboard screens #3fb6ff, neutral highlights #c9d3e6.
+- Characters: large round pale heads (#dfe6f2), two small dark dot eyes, a short thin brow line that shows emotion, no mouth or a tiny line, simple rounded torso in a flat clothing color, thin stroke limbs (stroke-width 10-16, round caps). Keep them simple and readable.
+- Cinematic composition for 9:16: a clear focal point in the middle third, depth with 2-4 layered planes, strong silhouettes, subtle vignette (dark radial gradient at the edges).
+- Keep the SVG compact: at most about 120 elements, reuse gradients via <defs>.
+
+Reply with ONLY the SVG markup, starting with <svg and ending with </svg>. No explanation, no markdown fences.`;
+
+/** Sahneyi Claude'a SVG olarak çizdirir; geçerli <svg>…</svg> döndürür */
+export async function drawSceneSvg(prompt: string, characters?: string): Promise<string> {
+  const { api, model } = await client();
+  const res = await api.beta.messages.create({
+    model,
+    max_tokens: 16000,
+    output_config: { effort: "low" },
+    system: SVG_STYLE_GUIDE,
+    messages: [
+      {
+        role: "user",
+        content: `${characters ? `Recurring characters (draw them exactly like this whenever they appear):\n${characters}\n\n` : ""}Scene to draw:\n${prompt}`,
+      },
+    ],
+    ...FALLBACK,
+  });
+  if (res.stop_reason === "refusal") throw new Error("Claude sahne çizimini reddetti");
+  const text = textOf(res.content);
+  const m = text.match(/<svg[\s\S]*<\/svg>/i);
+  if (!m) throw new Error(`Claude geçerli SVG döndürmedi (stop_reason=${res.stop_reason})`);
+  return m[0];
+}

@@ -135,6 +135,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <div>
             <label>Görsel sağlayıcı</label>
             <select name="imageProvider" defaultValue={s.imageProvider}>
+              <option value="claude">Claude çizimi (vektör, ek anahtar gerekmez)</option>
               <option value="fal">fal.ai (Flux)</option>
               <option value="replicate">Replicate (Flux)</option>
               <option value="mock">Deneme (degrade, anahtar gerekmez)</option>

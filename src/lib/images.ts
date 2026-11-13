@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import { ffmpeg } from "./ffmpeg";
 import { cfg } from "./config";
+import { drawSceneSvg } from "./claude";
+import { prisma } from "./db";
 
 /**
  * Görsel sağlayıcı arayüzü. Yeni bir sağlayıcı (ör. Higgsfield) eklemek için
@@ -68,7 +70,22 @@ const mock: ImageProvider = async (_prompt, outPath, seed) => {
   ]);
 };
 
-const PROVIDERS: Record<string, ImageProvider> = { fal, replicate, mock };
+/** SVG'yi 1080x1920 PNG'ye çevirir */
+export async function svgToPng(svg: string, outPath: string) {
+  const { Resvg } = await import("@resvg/resvg-js");
+  const png = new Resvg(svg, { fitTo: { mode: "width", value: 1080 }, background: "#070b16" }).render().asPng();
+  await fs.writeFile(outPath, png);
+}
+
+/** Claude sahneyi vektör çizim (SVG) olarak çizer; ek anahtar gerekmez */
+const claude: ImageProvider = async (prompt, outPath) => {
+  const s = await prisma.settings.findUnique({ where: { id: 1 } });
+  const svg = await drawSceneSvg(prompt, s?.contentFormat === "story" ? s.seriesCharacters : undefined);
+  await fs.writeFile(outPath.replace(/\.png$/, ".svg"), svg);
+  await svgToPng(svg, outPath);
+};
+
+const PROVIDERS: Record<string, ImageProvider> = { fal, replicate, mock, claude };
 
 export async function generateImage(provider: string, prompt: string, outPath: string, seed: number) {
   const fn = PROVIDERS[provider];

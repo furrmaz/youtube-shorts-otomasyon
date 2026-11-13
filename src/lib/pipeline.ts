@@ -146,14 +146,21 @@ export async function produceItem(id: string) {
 
     // 3) Görseller (var olanlar atlanır; yarıda kalan üretim kaldığı yerden devam eder)
     const seedBase = Math.abs([...id].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7));
-    for (let i = 0; i < scenes.length; i++) {
-      const img = path.join(dir, `scene_${String(i).padStart(2, "0")}.png`);
-      if (!(await exists(img))) {
-        await generateImage(s.imageProvider, scenes[i].imagePrompt, img, seedBase + i);
+    // Claude çizimi yavaş olduğundan aynı anda 4 sahne çizilir
+    const parallelism = s.imageProvider === "claude" ? 4 : 1;
+    let next = 0;
+    const workers = Array.from({ length: parallelism }, async () => {
+      while (next < scenes.length) {
+        const i = next++;
+        const img = path.join(dir, `scene_${String(i).padStart(2, "0")}.png`);
+        if (!(await exists(img))) {
+          await generateImage(s.imageProvider, scenes[i].imagePrompt, img, seedBase + i);
+        }
+        scenes[i].image = img;
+        await prisma.contentItem.update({ where: { id }, data: { scenes: JSON.stringify(scenes) } });
       }
-      scenes[i].image = img;
-      await prisma.contentItem.update({ where: { id }, data: { scenes: JSON.stringify(scenes) } });
-    }
+    });
+    await Promise.all(workers);
     await log(`Görseller hazır (${s.imageProvider})`, { itemId: id });
 
     // 4) Montaj
