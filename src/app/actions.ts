@@ -20,7 +20,8 @@ export async function saveSettings(f: FormData) {
     language: str(f, "language") || "tr",
     channelStyle: str(f, "channelStyle"),
     visualStyle: str(f, "visualStyle"),
-    elevenVoiceId: str(f, "elevenVoiceId"),
+    // API anahtarı (sk_...) yanlışlıkla ses alanına yapıştırılırsa kaydetme
+    elevenVoiceId: str(f, "elevenVoiceId").startsWith("sk_") ? "" : str(f, "elevenVoiceId"),
     videosPerDay: Math.min(5, Math.max(1, Number(str(f, "videosPerDay")) || 1)),
     publishTimes: str(f, "publishTimes") || "18:00",
     timezone: str(f, "timezone") || "Europe/Istanbul",

@@ -30,7 +30,8 @@ async function elevenLabs(text: string, voiceId: string, outPath: string): Promi
   const c = await cfg();
   const key = c.elevenApiKey;
   if (!key) throw new Error("ElevenLabs API anahtarı girilmemiş (Ayarlar → API anahtarları)");
-  if (!voiceId) throw new Error("Ayarlarda ElevenLabs ses ID'si boş");
+  if (!voiceId) throw new Error("Ayarlarda ElevenLabs sesi seçilmemiş");
+  if (voiceId.startsWith("sk_")) throw new Error("Ses alanına API anahtarı girilmiş; Ayarlar'dan listeden bir ses seçin");
   const res = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=mp3_44100_128`,
     {
