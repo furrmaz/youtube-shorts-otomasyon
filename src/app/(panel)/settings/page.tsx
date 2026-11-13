@@ -77,9 +77,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <div>
             <label>ElevenLabs sesi</label>
             {voices.length > 0 ? (
-              <select name="elevenVoiceId" defaultValue={s.elevenVoiceId}>
+              <select name="elevenVoiceId" defaultValue={s.elevenVoiceId.startsWith("sk_") ? "" : s.elevenVoiceId}>
                 <option value="">— ses seçin —</option>
-                {!voiceKnown && s.elevenVoiceId && <option value={s.elevenVoiceId}>{s.elevenVoiceId}</option>}
+                {!voiceKnown && s.elevenVoiceId && !s.elevenVoiceId.startsWith("sk_") && <option value={s.elevenVoiceId}>{s.elevenVoiceId}</option>}
                 {voices.map((v) => (
                   <option key={v.voice_id} value={v.voice_id}>
                     {v.name}
@@ -91,6 +91,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <input name="elevenVoiceId" defaultValue={s.elevenVoiceId} placeholder="Ses ID (anahtarı girince liste çıkar)" />
             )}
             {voiceErr && <div className="err">{voiceErr}</div>}
+            {s.elevenVoiceId.startsWith("sk_") && <div className="err">Bu alana API anahtarı girilmiş; listeden bir ses seçip kaydedin.</div>}
           </div>
           <div>
             <label>Görsel sağlayıcı</label>
