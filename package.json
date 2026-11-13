@@ -9,7 +9,9 @@
     "worker": "tsx --env-file=.env scripts/worker.ts",
     "demo": "tsx --env-file=.env scripts/demo.ts",
     "db:push": "prisma db push",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "kurulum": "prisma db push && next build",
+    "baslat": "node scripts/start-all.mjs"
   },
   "author": "",
   "license": "ISC",
