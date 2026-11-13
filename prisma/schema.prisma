@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Tek kullanıcılı panel: ayarlar tek satır (id = 1)
+model Settings {
+  id                Int      @id @default(1)
+  niche             String   @default("")
+  language          String   @default("tr")
+  channelStyle      String   @default("Merak uyandıran, bilgilendirici, samimi")
+  visualStyle       String   @default("flat 2D hand-drawn illustration, soft pastel colors, clean ink outlines, storybook style")
+  elevenVoiceId     String   @default("")
+  videosPerDay      Int      @default(1)
+  publishTimes      String   @default("18:00") // virgülle ayrılmış HH:MM listesi
+  timezone          String   @default("Europe/Istanbul")
+  privacyStatus     String   @default("public") // public | unlisted | private
+  imageProvider     String   @default("mock")   // mock | fal | replicate
+  ttsProvider       String   @default("mock")   // mock | elevenlabs
+  autoProduce       Boolean  @default(true)
+  produceHoursAhead Int      @default(6)
+  updatedAt         DateTime @updatedAt
+}
+
+model YoutubeAccount {
+  id           Int      @id @default(1)
+  channelId    String
+  channelTitle String
+  accessToken  String
+  refreshToken String
+  expiryDate   DateTime?
+  updatedAt    DateTime @updatedAt
+}
+
+model ContentItem {
+  id             String    @id @default(cuid())
+  dayIndex       Int
+  publishAt      DateTime
+  topic          String
+  hook           String
+  script         String
+  title          String
+  description    String
+  tags           String    // JSON dizi
+  // DRAFT -> APPROVED -> PRODUCING -> READY -> UPLOADING -> UPLOADED | FAILED
+  status         String    @default("DRAFT")
+  scenes         String?   // JSON: [{text, imagePrompt, start, end, image}]
+  audioPath      String?
+  videoPath      String?
+  youtubeVideoId String?
+  error          String?
+  attempts       Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  logs           JobLog[]
+
+  @@index([status, publishAt])
+}
+
+model JobLog {
+  id        Int         @id @default(autoincrement())
+  itemId    String?
+  item      ContentItem? @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  level     String      @default("info")
+  message   String
+  createdAt DateTime    @default(now())
+}
