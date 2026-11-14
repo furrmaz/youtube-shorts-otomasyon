@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import fs from "node:fs/promises";
 import { prisma } from "@/lib/db";
-import { createQuickVideo, generateCalendar, produceItem, uploadItem } from "@/lib/pipeline";
+import { createQuickVideo, generateCalendar, produceItem, refreshStats, uploadItem } from "@/lib/pipeline";
 import { requireAuth, setAuthCookie } from "@/lib/auth";
 import { cfg } from "@/lib/config";
 import { testClaude, STORY_VISUAL_STYLE } from "@/lib/claude";
@@ -38,6 +38,12 @@ export async function saveSettings(f: FormData) {
     subtitleStyle: ["karaoke", "minimal", "off"].includes(str(f, "subtitleStyle")) ? str(f, "subtitleStyle") : "karaoke",
     watermark: str(f, "watermark"),
     musicVolume: Math.min(1, Math.max(0, Number(str(f, "musicVolume").replace(",", ".")) || 0)),
+    musicSource: ["off", "folder", "eleven"].includes(str(f, "musicSource")) ? str(f, "musicSource") : "folder",
+    musicPrompt: str(f, "musicPrompt"),
+    sfx: f.get("sfx") === "on",
+    particles: f.get("particles") === "on",
+    progressBar: f.get("progressBar") === "on",
+    hookText: f.get("hookText") === "on",
   };
   // Hikâye moduna ilk geçişte örnek videodaki görsel dili ve sade altyazıyı varsayılan yap
   const prev = await prisma.settings.findUnique({ where: { id: 1 } });
@@ -141,6 +147,39 @@ export async function regenerateMedia(f: FormData) {
   revalidatePath(`/items/${id}`);
 }
 
+/** Tek bir sahnenin görselini (isteğe bağlı yeni tarifle) yeniden üretir, ses ve diğer sahneler korunur */
+export async function redrawScene(f: FormData) {
+  await requireAuth();
+  const id = str(f, "id");
+  const idx = Number(str(f, "idx"));
+  const prompt = str(f, "prompt");
+  const it = await prisma.contentItem.findUnique({ where: { id } });
+  if (!it?.scenes || !["READY", "FAILED"].includes(it.status)) return;
+  const scenes = JSON.parse(it.scenes) as { imagePrompt: string; image?: string }[];
+  const sc = scenes[idx];
+  if (!sc) return;
+  if (prompt) sc.imagePrompt = prompt;
+  if (sc.image) {
+    const base = sc.image.replace(/\.png$/, "");
+    await Promise.all(
+      [".png", ".svg", "_bg.png", "_mid.png", "_fg.png"].map((ext) => fs.rm(base + ext, { force: true })),
+    );
+  }
+  await prisma.contentItem.update({ where: { id }, data: { scenes: JSON.stringify(scenes), error: null } });
+  void produceItem(id);
+  await new Promise((r) => setTimeout(r, 300));
+  revalidatePath(`/items/${id}`);
+}
+
+/** Ses ve görselleri koruyup yalnızca montajı güncel ayarlarla (müzik, efektler, altyazı) yeniden yapar */
+export async function rerenderVideo(f: FormData) {
+  await requireAuth();
+  const id = str(f, "id");
+  void produceItem(id);
+  await new Promise((r) => setTimeout(r, 300));
+  revalidatePath(`/items/${id}`);
+}
+
 export async function uploadNow(f: FormData) {
   await requireAuth();
   const id = str(f, "id");
@@ -223,4 +262,10 @@ export async function quickVideo(f: FormData) {
   await requireAuth();
   const id = await createQuickVideo({ topicHint: str(f, "topic"), publishNow: str(f, "mode") === "publish" });
   redirect(`/items/${id}`);
+}
+
+export async function refreshStatsNow() {
+  await requireAuth();
+  await refreshStats(true);
+  revalidatePath("/");
 }

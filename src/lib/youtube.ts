@@ -131,3 +131,24 @@ export async function countVotes(videoId: string): Promise<{ a: number; b: numbe
   for (const v of voters.values()) v === "A" ? a++ : b++;
   return { a, b };
 }
+
+export type VideoStats = { views: number; likes: number; comments: number };
+
+/** Yüklenen videoların izlenme/beğeni/yorum sayıları (50'şerli gruplar halinde) */
+export async function fetchStats(videoIds: string[]): Promise<Map<string, VideoStats>> {
+  const auth = await authedClient();
+  const yt = google.youtube({ version: "v3", auth });
+  const out = new Map<string, VideoStats>();
+  for (let i = 0; i < videoIds.length; i += 50) {
+    const res = await yt.videos.list({ part: ["statistics"], id: videoIds.slice(i, i + 50), maxResults: 50 });
+    for (const v of res.data.items ?? []) {
+      if (!v.id) continue;
+      out.set(v.id, {
+        views: Number(v.statistics?.viewCount ?? 0),
+        likes: Number(v.statistics?.likeCount ?? 0),
+        comments: Number(v.statistics?.commentCount ?? 0),
+      });
+    }
+  }
+  return out;
+}

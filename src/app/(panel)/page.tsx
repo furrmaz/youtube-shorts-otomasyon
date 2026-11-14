@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 import { formatLocal } from "@/lib/time";
-import { disconnectYoutube, quickVideo } from "@/app/actions";
+import { disconnectYoutube, quickVideo, refreshStatsNow } from "@/app/actions";
 import { STATUS_TR } from "@/app/status";
 
 export const dynamic = "force-dynamic";
@@ -19,11 +19,25 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     take: 10,
   });
   const recent = await prisma.contentItem.findMany({ where: { status: "UPLOADED" }, orderBy: { publishAt: "desc" }, take: 5 });
+  const since30 = new Date(Date.now() - 30 * 86400_000);
+  const agg = await prisma.contentItem.aggregate({
+    where: { status: "UPLOADED", publishAt: { gte: since30 }, views: { not: null } },
+    _sum: { views: true, likes: true, comments: true },
+    _avg: { views: true },
+    _count: true,
+  });
+  const top = await prisma.contentItem.findMany({
+    where: { views: { not: null } },
+    orderBy: { views: "desc" },
+    take: 5,
+  });
+  const fmt = (n: number | null | undefined) => Math.round(n ?? 0).toLocaleString("tr-TR");
   const logs = await prisma.jobLog.findMany({ orderBy: { id: "desc" }, take: 40 });
 
   return (
     <>
       <h1>Panel</h1>
+      {upcoming.some((u) => ["WRITING", "PRODUCING", "UPLOADING"].includes(u.status)) && <meta httpEquiv="refresh" content="15" />}
       {yt === "ok" && <div className="card">YouTube kanalı bağlandı ✓</div>}
       {yt === "err" && <div className="card err">YouTube bağlantısı başarısız: {msg}</div>}
 
@@ -76,6 +90,38 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </div>
       </div>
 
+      {account && (
+        <>
+          <h2>Performans (son 30 gün)</h2>
+          <div className="card">
+            <div className="grid">
+              <div className="stat"><b>{fmt(agg._sum.views)}</b><span>izlenme</span></div>
+              <div className="stat"><b>{fmt(agg._avg.views)}</b><span>video başına ortalama</span></div>
+              <div className="stat"><b>{fmt(agg._sum.likes)}</b><span>beğeni</span></div>
+              <div className="stat"><b>{fmt(agg._sum.comments)}</b><span>yorum</span></div>
+              <div className="stat"><b>{agg._count}</b><span>yayınlanan video</span></div>
+            </div>
+            {top.length > 0 && (
+              <table style={{ marginTop: 12 }}>
+                <tbody>
+                  {top.map((it, i) => (
+                    <tr key={it.id}>
+                      <td className="muted">{i + 1}.</td>
+                      <td><Link href={`/items/${it.id}`}>{it.title}</Link></td>
+                      <td style={{ whiteSpace: "nowrap" }}>👁 {fmt(it.views)} · 👍 {fmt(it.likes)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <form action={refreshStatsNow} className="row" style={{ marginTop: 10 }}>
+              <span className="muted">İstatistikler saatte bir güncellenir; Claude yeni konu seçerken en iyi videolardan öğrenir.</span>
+              <button className="secondary" style={{ marginLeft: "auto" }}>Şimdi güncelle</button>
+            </form>
+          </div>
+        </>
+      )}
+
       <h2>Sıradaki videolar</h2>
       <div className="card">
         {upcoming.length === 0 ? (
@@ -86,7 +132,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               {upcoming.map((it) => (
                 <tr key={it.id}>
                   <td style={{ whiteSpace: "nowrap" }}>{formatLocal(it.publishAt, s.timezone)}</td>
-                  <td><Link href={`/items/${it.id}`}>{it.title}</Link>{it.error && <div className="err">{it.error}</div>}</td>
+                  <td>
+                    <Link href={`/items/${it.id}`}>{it.title}</Link>
+                    {it.progress && <div className="muted">⏳ {it.progress}</div>}
+                    {it.error && <div className="err">{it.error}</div>}
+                  </td>
                   <td><span className={`badge ${it.status}`}>{STATUS_TR[it.status]}</span></td>
                 </tr>
               ))}
@@ -104,7 +154,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                 {recent.map((it) => (
                   <tr key={it.id}>
                     <td style={{ whiteSpace: "nowrap" }}>{formatLocal(it.publishAt, s.timezone)}</td>
-                    <td>{it.title}</td>
+                    <td><Link href={`/items/${it.id}`}>{it.title}</Link></td>
+                    <td style={{ whiteSpace: "nowrap" }}>{it.views != null ? `👁 ${fmt(it.views)}` : ""}</td>
                     <td><a href={`https://youtube.com/shorts/${it.youtubeVideoId}`} target="_blank">YouTube&apos;da aç</a></td>
                   </tr>
                 ))}

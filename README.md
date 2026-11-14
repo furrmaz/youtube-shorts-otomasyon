@@ -50,7 +50,18 @@ Tarayıcıda **http://localhost:3000** adresini açın. Bu komut paneli ve zaman
 
 İpucu: Videolar yayın saatinden `produceHoursAhead` saat önce (varsayılan 6) üretilip YouTube'a ileri tarihli yüklenir. YouTube yayını kendisi yapar, yani yükleme bittikten sonra bilgisayarın açık olması gerekmez. Bilgisayarı günde bir kez birkaç saat açık tutmanız yeterli; daha fazla günü önceden hazırlamak için Ayarlar'dan bu süreyi artırabilirsiniz (ör. 48).
 
-Güncelleme geldiğinde: `git pull`, `npm install`, `npm run kurulum`, sonra yine `npm run baslat`.
+Sonraki açılışlarda proje klasöründeki **Baslat.bat** dosyasına çift tıklamanız yeterli; panel tarayıcıda kendiliğinden açılır.
+
+Yeni sürüm çıktığında panelin üstünde mavi bir uyarı görünür. Uygulamayı kapatıp **Guncelle.bat** dosyasına çift tıklayın (veya `npm run guncelle`), bitince Baslat.bat ile açın.
+
+## Video kalitesi özellikleri
+
+- **2.5D hareket:** "Claude çizimi" seçiliyken her sahne arka plan, özne ve ön plan katmanlarıyla çizilir; kamera hareket ederken katmanlar farklı hızlarda kayar ve derinlik hissi oluşur.
+- **Açılış başlığı, ilerleme çubuğu, ışık parçacıkları, kenar karartma** (Ayarlar → Müzik ve efektler'den açılıp kapatılır).
+- **Ses:** -14 LUFS seviyeye normalize edilir, sahne geçişlerinde hafif geçiş sesi, konuşma sırasında müzik otomatik kısılır.
+- **Müzik:** `music` klasöründeki parçalar ya da ElevenLabs ile üretilen telifsiz parçalar (ücretli ElevenLabs planı gerekir).
+- **Kalite kontrol:** video sayfasında beğenmediğiniz sahneyi tarifini düzenleyip yeniden çizdirebilir, sadece montajı yenileyebilir, MP4'ü TikTok/Reels için indirebilirsiniz.
+- **Performans:** YouTube izlenme/beğeni/yorum sayıları saatte bir çekilir, panelde gösterilir; Claude yeni konu seçerken en iyi ve en zayıf videolardan öğrenir.
 
 ## API anahtarları
 

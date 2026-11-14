@@ -11,7 +11,8 @@
     "db:push": "prisma db push",
     "typecheck": "tsc --noEmit",
     "kurulum": "prisma db push && next build",
-    "baslat": "node scripts/start-all.mjs"
+    "baslat": "node scripts/start-all.mjs",
+    "guncelle": "node scripts/guncelle.mjs"
   },
   "author": "",
   "license": "ISC",

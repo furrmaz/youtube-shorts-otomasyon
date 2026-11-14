@@ -19,7 +19,7 @@ model Settings {
   publishTimes      String   @default("18:00") // virgülle ayrılmış HH:MM listesi
   timezone          String   @default("Europe/Istanbul")
   privacyStatus     String   @default("public") // public | unlisted | private
-  imageProvider     String   @default("mock")   // mock | fal | replicate
+  imageProvider     String   @default("claude") // claude | fal | replicate | mock
   ttsProvider       String   @default("mock")   // mock | elevenlabs
   autoProduce       Boolean  @default(true)
   produceHoursAhead Int      @default(6)
@@ -45,6 +45,12 @@ model Settings {
   subtitleStyle      String  @default("karaoke") // karaoke | minimal | off
   watermark          String  @default("")
   musicVolume        Float   @default(0.12) // music/ klasöründeki mp3'ler için
+  musicSource        String  @default("folder") // off | folder | eleven (ElevenLabs ile üret)
+  musicPrompt        String  @default("")       // ElevenLabs müzik tarifi (boşsa formata göre)
+  sfx                Boolean @default(true)     // sahne geçişlerinde hafif "whoosh" sesi
+  particles          Boolean @default(true)     // havada süzülen toz/ışık parçacıkları
+  progressBar        Boolean @default(true)     // üstte ilerleme çubuğu
+  hookText           Boolean @default(true)     // bilgi videolarında ilk saniyelerde büyük başlık
   updatedAt         DateTime @updatedAt
 }
 
@@ -85,6 +91,12 @@ model ContentItem {
   votesA         Int?
   votesB         Int?
   chosen         String?   // bu bölümü başlatan, önceki bölümde seçilen seçenek
+  progress       String?   // üretim aşaması, ör. "Görseller 4/12"
+  // YouTube istatistikleri (saatlik güncellenir)
+  views          Int?
+  likes          Int?
+  comments       Int?
+  statsAt        DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   logs           JobLog[]

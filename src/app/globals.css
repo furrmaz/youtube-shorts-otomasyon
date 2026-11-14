@@ -40,3 +40,14 @@ video { max-width: 100%; max-height: 640px; border-radius: 10px; background: #00
 .thumbs { display: flex; gap: 8px; overflow-x: auto; }
 .thumbs img { height: 180px; border-radius: 6px; }
 .badge.WRITING { background: #3b2a5c; }
+.checks { display: grid; gap: 6px 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 12px; }
+.checks label { display: flex; gap: 8px; align-items: center; color: var(--text); margin: 0; font-size: 14px; }
+.checks input { width: auto; }
+.scenes { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.scene { background: #0c0e12; border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: 13px; }
+.scene img, .scene-empty { width: 100%; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 6px; display: grid; place-items: center; background: #11141a; }
+.scene-text { margin: 4px 0; }
+.banner { border-radius: 10px; padding: 10px 16px; margin-bottom: 14px; font-size: 14px; }
+.banner a { text-decoration: underline; color: inherit; }
+.banner.warn { background: #3a2a10; border: 1px solid #a8741a; color: #ffd27a; }
+.banner.info { background: #12253d; border: 1px solid #2d5f99; color: #cfe4ff; }
