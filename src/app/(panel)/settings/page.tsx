@@ -135,7 +135,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <div>
             <label>Görsel sağlayıcı</label>
             <select name="imageProvider" defaultValue={s.imageProvider}>
-              <option value="claude">Claude çizimi (vektör, ek anahtar gerekmez)</option>
+              <option value="claude">Claude çizimi (katmanlı vektör, 2.5D hareket, ek anahtar gerekmez)</option>
               <option value="fal">fal.ai (Flux)</option>
               <option value="replicate">Replicate (Flux)</option>
               <option value="mock">Deneme (degrade, anahtar gerekmez)</option>
@@ -156,11 +156,36 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <label>Filigran (ör. kanal adı, boşsa yok)</label>
             <input name="watermark" defaultValue={s.watermark} placeholder="@kanaladi" />
           </div>
+        </div>
+
+        <h2>Müzik ve efektler</h2>
+        <div className="two">
           <div>
-            <label>Arka plan müziği seviyesi (0 = kapalı, 0.12 önerilir)</label>
-            <input name="musicVolume" type="number" step="0.01" min={0} max={1} defaultValue={s.musicVolume} />
-            <div className="muted">Proje klasöründeki <code>music</code> klasörüne koyduğunuz mp3&apos;lerden biri rastgele seçilir.</div>
+            <label>Arka plan müziği</label>
+            <select name="musicSource" defaultValue={s.musicSource}>
+              <option value="folder">music klasöründeki parçalar</option>
+              <option value="eleven">ElevenLabs ile üret (ücretli plan gerekir)</option>
+              <option value="off">Müzik yok</option>
+            </select>
+            <div className="muted">
+              ElevenLabs seçilirse ilk videolarda telifsiz parçalar üretilip <code>music</code> klasörüne kaydedilir (6 parçaya kadar), sonra bunlar dönüşümlü kullanılır.
+            </div>
           </div>
+          <div>
+            <label>Müzik seviyesi (0.12 önerilir)</label>
+            <input name="musicVolume" type="number" step="0.01" min={0} max={1} defaultValue={s.musicVolume} />
+            <div className="muted">Konuşma sırasında müzik otomatik olarak kısılır.</div>
+          </div>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label>Müzik tarifi (ElevenLabs için, İngilizce, boşsa formata uygun hazır tarif)</label>
+            <input name="musicPrompt" defaultValue={s.musicPrompt} placeholder="dark cinematic suspense underscore, slow pulsing synth, no vocals" />
+          </div>
+        </div>
+        <div className="checks">
+          <label><input type="checkbox" name="sfx" defaultChecked={s.sfx} /> Sahne geçişlerinde hafif geçiş sesi</label>
+          <label><input type="checkbox" name="particles" defaultChecked={s.particles} /> Havada süzülen ışık parçacıkları</label>
+          <label><input type="checkbox" name="progressBar" defaultChecked={s.progressBar} /> Üstte ilerleme çubuğu</label>
+          <label><input type="checkbox" name="hookText" defaultChecked={s.hookText} /> Bilgi videolarında ilk saniyelerde büyük başlık</label>
         </div>
 
         <h2>Yayın planı</h2>

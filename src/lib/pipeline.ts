@@ -8,7 +8,8 @@ import { planScenes, researchNiche, generateCalendarChunk, createSeriesBible, wr
 import { synthesize, type Word } from "./tts";
 import { generateImage } from "./images";
 import { renderVideo, timeScenes, type Scene } from "./video";
-import { uploadShort, countVotes } from "./youtube";
+import { musicFor } from "./music";
+import { uploadShort, countVotes, fetchStats } from "./youtube";
 import { addDaysYmd, parsePublishTimes, ymdInTz, zonedToUtc } from "./time";
 
 /** API hatalarını anlaşılır Türkçe mesaja çevirir */
@@ -18,6 +19,14 @@ function explain(e: unknown): string {
   if (/^429\b/.test(msg)) return "Claude kullanım sınırına takıldı, biraz sonra tekrar deneyin";
   if (/credit balance/i.test(msg)) return "Claude hesabında kredi yok (console.anthropic.com → Billing)";
   return msg;
+}
+
+/** Açılış kancası için kısa başlık: başlığın ":" öncesi, etiket/emoji olmadan, en fazla ~42 karakter */
+function hookOf(title: string, topic: string) {
+  const base = (title || topic).split(/\s[:|–—-]\s|:\s/)[0].replace(/#\S+/g, "").replace(/[\p{Extended_Pictographic}]/gu, "").trim();
+  if (base.length <= 42) return base;
+  const cut = base.slice(0, 42);
+  return cut.slice(0, cut.lastIndexOf(" ")) + "…";
 }
 
 // Aynı süreç içinde paralel çalışmayı engelleyen basit kilit
@@ -48,7 +57,7 @@ export async function generateCalendar(days = 30) {
     const lastIndex = last?.dayIndex ?? 0;
 
     await log(`Takvim üretimi başladı: ${days} gün, günde ${s.videosPerDay} video, niş "${s.niche}"`);
-    const research = await researchNiche(s);
+    const research = (await researchNiche(s)) + (await performanceNotes());
     await log(`Araştırma tamamlandı (${research.length} karakter)`);
 
     const previous = await prisma.contentItem.findMany({ select: { topic: true }, orderBy: { publishAt: "desc" }, take: 100 });
@@ -106,6 +115,8 @@ export async function produceItem(id: string) {
     const dir = await itemDir(id);
     const isStory = item.episodeNumber != null;
     await log("Üretim başladı", { itemId: id });
+    const progress = (m: string | null) => prisma.contentItem.update({ where: { id }, data: { progress: m } }).then(() => undefined);
+    await progress("Seslendirme");
 
     // 1) Ses + kelime zamanları
     const audioPath = path.join(dir, "voice.mp3");
@@ -124,6 +135,7 @@ export async function produceItem(id: string) {
     if (duration > (isStory ? 175 : 62)) await log(`Uyarı: ses ${duration.toFixed(0)} sn, 60 sn üstü`, { itemId: id, level: "warn" });
 
     // 2) Sahne planı (görsel istemleri)
+    await progress("Sahne planı");
     let scenes: Scene[];
     const existing = item.scenes ? (JSON.parse(item.scenes) as Scene[]) : null;
     if (existing?.length) {
@@ -149,6 +161,8 @@ export async function produceItem(id: string) {
     // Claude çizimi yavaş olduğundan aynı anda 4 sahne çizilir
     const parallelism = s.imageProvider === "claude" ? 4 : 1;
     let next = 0;
+    let done = 0;
+    await progress(`Görseller 0/${scenes.length}`);
     const workers = Array.from({ length: parallelism }, async () => {
       while (next < scenes.length) {
         const i = next++;
@@ -157,7 +171,11 @@ export async function produceItem(id: string) {
           await generateImage(s.imageProvider, scenes[i].imagePrompt, img, seedBase + i);
         }
         scenes[i].image = img;
-        await prisma.contentItem.update({ where: { id }, data: { scenes: JSON.stringify(scenes) } });
+        done++;
+        await prisma.contentItem.update({
+          where: { id },
+          data: { scenes: JSON.stringify(scenes), progress: `Görseller ${done}/${scenes.length}` },
+        });
       }
     });
     await Promise.all(workers);
@@ -171,9 +189,13 @@ export async function produceItem(id: string) {
       transition: isStory ? "fade" : "varied",
       endCardSeconds: isStory && item.choiceA ? 5 : 0,
       musicVolume: s.musicVolume,
+      musicPath: await musicFor(s, isStory, duration, (m, warn) => log(m, { itemId: id, level: warn ? "warn" : "info" })),
+      fx: { particles: s.particles, progressBar: s.progressBar, sfx: s.sfx, vignette: true },
+      onProgress: progress,
       overlays: {
         subtitleStyle: s.subtitleStyle as "karaoke" | "minimal" | "off",
         watermark: s.watermark,
+        ...(!isStory && s.hookText ? { hook: hookOf(item.title, item.topic) } : {}),
         ...(isStory
           ? {
               titleCard: { title: s.seriesTitle || "Hikâye", badge: `Bölüm ${item.episodeNumber} · ${item.topic}` },
@@ -186,11 +208,11 @@ export async function produceItem(id: string) {
     });
     await prisma.contentItem.update({
       where: { id },
-      data: { status: "READY", audioPath, videoPath: outPath, scenes: JSON.stringify(scenes) },
+      data: { status: "READY", audioPath, videoPath: outPath, scenes: JSON.stringify(scenes), progress: null },
     });
     await log("Video hazır", { itemId: id });
   } catch (e) {
-    await prisma.contentItem.update({ where: { id }, data: { status: "FAILED", error: explain(e) } });
+    await prisma.contentItem.update({ where: { id }, data: { status: "FAILED", error: explain(e), progress: null } });
     await log(`Üretim hatası: ${explain(e)}`, { itemId: id, level: "error" });
   } finally {
     busy.delete(id);
@@ -252,11 +274,57 @@ export async function tick() {
     }
   }
 
+  if (yt) await refreshStats();
+
   // Takılı kalmış işler (ör. süreç çöktü): 1 saatten eskiyse FAILED yap
   await prisma.contentItem.updateMany({
     where: { status: { in: ["WRITING", "PRODUCING", "UPLOADING"] }, updatedAt: { lt: new Date(now - 3600_000) } },
-    data: { status: "FAILED", error: "İşlem yarıda kaldı, tekrar deneyin" },
+    data: { status: "FAILED", error: "İşlem yarıda kaldı, tekrar deneyin", progress: null },
   });
+}
+
+/** Son 60 günde yüklenen videoların istatistiklerini saatte bir günceller */
+export async function refreshStats(force = false) {
+  const hourAgo = new Date(Date.now() - 3600_000);
+  const items = await prisma.contentItem.findMany({
+    where: {
+      status: "UPLOADED",
+      youtubeVideoId: { not: null },
+      publishAt: { gte: new Date(Date.now() - 60 * 86400_000), lte: new Date() },
+      ...(force ? {} : { OR: [{ statsAt: null }, { statsAt: { lt: hourAgo } }] }),
+    },
+    select: { id: true, youtubeVideoId: true },
+  });
+  if (!items.length) return 0;
+  try {
+    const stats = await fetchStats(items.map((i) => i.youtubeVideoId!));
+    for (const it of items) {
+      const st = stats.get(it.youtubeVideoId!);
+      await prisma.contentItem.update({
+        where: { id: it.id },
+        data: st ? { ...st, statsAt: new Date() } : { statsAt: new Date() },
+      });
+    }
+    return stats.size;
+  } catch (e) {
+    await log(`İstatistikler alınamadı: ${explain(e)}`, { level: "warn" });
+    return 0;
+  }
+}
+
+/** Kanalın en iyi ve en zayıf videoları: Claude yeni konu seçerken bunlardan öğrenir */
+async function performanceNotes(): Promise<string> {
+  const rated = await prisma.contentItem.findMany({
+    where: { views: { not: null }, publishAt: { lt: new Date(Date.now() - 2 * 86400_000) } },
+    orderBy: { views: "desc" },
+    select: { topic: true, title: true, hook: true, views: true, likes: true },
+    take: 200,
+  });
+  if (rated.length < 5) return "";
+  const line = (r: (typeof rated)[number]) => `- "${r.title}" (konu: ${r.topic}; kanca: ${r.hook.slice(0, 90)}) → ${r.views} izlenme, ${r.likes ?? 0} beğeni`;
+  const top = rated.slice(0, 5).map(line).join("\n");
+  const bottom = rated.slice(-3).map(line).join("\n");
+  return `\n\nKANALIN GERÇEK PERFORMANS VERİSİ (YouTube):\nEn çok izlenenler:\n${top}\nEn az izlenenler:\n${bottom}\nİyi performans gösteren konu türlerinden, kanca yapılarından ve başlık kalıplarından ilham al; zayıf olanlardan kaçın. Aynı konuları tekrar etme.`;
 }
 
 /**
@@ -307,7 +375,8 @@ async function runQuickVideo(id: string, topicHint: string, publishNow: boolean)
     const brief = topicHint
       ? `Bu videonun konusu kullanıcı tarafından belirlendi: "${topicHint}". Bu konuyu işle.`
       : "Ayrı bir araştırma raporu yok; nişte ilgi çekici, doğruluğundan emin olduğun bir konu seç.";
-    const [it] = await generateCalendarChunk(s, brief, 1, previous.map((p) => p.topic));
+    const notes = await performanceNotes();
+    const [it] = await generateCalendarChunk(s, brief + notes, 1, previous.map((p) => p.topic));
     if (!it) throw new Error("Claude metin döndürmedi");
     await prisma.contentItem.update({
       where: { id },

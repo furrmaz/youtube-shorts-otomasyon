@@ -70,11 +70,35 @@ const mock: ImageProvider = async (_prompt, outPath, seed) => {
   ]);
 };
 
-/** SVG'yi 1080x1920 PNG'ye çevirir */
-export async function svgToPng(svg: string, outPath: string) {
+/** SVG'yi PNG'ye çevirir (width: çıktı genişliği, transparent: arka plan boyanmaz) */
+export async function svgToPng(svg: string, outPath: string, width = 1080, transparent = false) {
   const { Resvg } = await import("@resvg/resvg-js");
-  const png = new Resvg(svg, { fitTo: { mode: "width", value: 1080 }, background: "#070b16" }).render().asPng();
+  const png = new Resvg(svg, {
+    fitTo: { mode: "width", value: width },
+    ...(transparent ? {} : { background: "#070b16" }),
+  }).render().asPng();
   await fs.writeFile(outPath, png);
+}
+
+export const LAYERS = ["bg", "mid", "fg"] as const;
+export type Layer = (typeof LAYERS)[number];
+export const layerPath = (img: string, layer: Layer) => img.replace(/\.png$/, `_${layer}.png`);
+
+/**
+ * Katmanlı SVG'den (<g id="bg">, <g id="mid">, <g id="fg">) her katmanı ayrı PNG olarak çıkarır.
+ * Video montajında katmanlar farklı hızlarda hareket ettirilerek derinlik (2.5D parallax) verilir.
+ * Katman yoksa false döner; sahne tek görsel olarak kullanılır.
+ */
+export async function renderLayers(svg: string, imgPath: string): Promise<boolean> {
+  const has = (id: string) => new RegExp(`<g[^>]*\\bid=["']${id}["']`).test(svg);
+  if (!has("bg") || !has("mid")) return false;
+  for (const layer of LAYERS) {
+    const hide = LAYERS.filter((l) => l !== layer).map((l) => `#${l}`).join(",");
+    const variant = svg.replace(/(<svg[^>]*>)/, `$1<style>${hide}{display:none}</style>`);
+    // 2x çözünürlük: kamera yakınlaştığında çizgiler keskin kalır
+    await svgToPng(variant, layerPath(imgPath, layer), 2160, layer !== "bg");
+  }
+  return true;
 }
 
 /** Claude sahneyi vektör çizim (SVG) olarak çizer; ek anahtar gerekmez */
@@ -83,6 +107,7 @@ const claude: ImageProvider = async (prompt, outPath) => {
   const svg = await drawSceneSvg(prompt, s?.contentFormat === "story" ? s.seriesCharacters : undefined);
   await fs.writeFile(outPath.replace(/\.png$/, ".svg"), svg);
   await svgToPng(svg, outPath);
+  await renderLayers(svg, outPath);
 };
 
 const PROVIDERS: Record<string, ImageProvider> = { fal, replicate, mock, claude };

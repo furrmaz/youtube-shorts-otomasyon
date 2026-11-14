@@ -14,6 +14,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!p.startsWith(MEDIA_DIR + path.sep) || !fs.existsSync(p)) return new Response("Not found", { status: 404 });
   const size = fs.statSync(p).size;
   const type = TYPES[path.extname(p)] ?? "application/octet-stream";
+  const download = new URL(req.url).searchParams.has("download");
+  if (download) {
+    const stream = Readable.toWeb(fs.createReadStream(p)) as ReadableStream;
+    return new Response(stream, {
+      headers: { "Content-Type": type, "Content-Length": String(size), "Content-Disposition": `attachment; filename="short-${id}${path.extname(p)}"` },
+    });
+  }
   const range = req.headers.get("range");
   if (range) {
     const m = /bytes=(\d*)-(\d*)/.exec(range);

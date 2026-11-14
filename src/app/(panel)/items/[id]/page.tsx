@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 import { formatLocal } from "@/lib/time";
 import type { Scene } from "@/lib/video";
-import { produceNow, regenerateMedia, setStatus, uploadNow } from "@/app/actions";
+import { produceNow, redrawScene, regenerateMedia, rerenderVideo, setStatus, uploadNow } from "@/app/actions";
 import { STATUS_TR } from "@/app/status";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +28,10 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
         <span className={`badge ${it.status}`}>{STATUS_TR[it.status]}</span>
         <span className="muted">Yayın: {formatLocal(it.publishAt, s.timezone)} · Deneme {it.attempts}</span>
         {it.youtubeVideoId && <a href={`https://youtube.com/shorts/${it.youtubeVideoId}`} target="_blank">YouTube&apos;da aç</a>}
-        {busy && <span className="muted">⏳ işlem sürüyor, sayfa kendini yeniliyor</span>}
+        {busy && <span className="muted">⏳ {it.progress ?? "işlem sürüyor"}, sayfa kendini yeniliyor</span>}
+        {it.views != null && (
+          <span className="muted">👁 {it.views.toLocaleString("tr-TR")} izlenme · 👍 {it.likes ?? 0} · 💬 {it.comments ?? 0}</span>
+        )}
         {busy && <meta httpEquiv="refresh" content="8" />}
         {it.status === "READY" && !it.autoUpload && <span className="muted">Otomatik yüklenmeyecek, kontrol edip yükleyin</span>}
       </div>
@@ -54,6 +57,15 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
             <button className="secondary">Baştan üret (yeni ses + görseller)</button>
           </form>
         )}
+        {["READY", "FAILED"].includes(it.status) && it.scenes && (
+          <form action={rerenderVideo}>
+            <input type="hidden" name="id" value={it.id} />
+            <button className="secondary" title="Ses ve görseller korunur; müzik, efekt ve altyazı ayarları yeniden uygulanır">Sadece montajı yenile</button>
+          </form>
+        )}
+        {it.videoPath && (
+          <a className="btn secondary" href={`/api/media/${it.id}/short.mp4?download=1`}>MP4 indir (TikTok / Reels)</a>
+        )}
         {it.status === "READY" && (
           <form action={uploadNow}>
             <input type="hidden" name="id" value={it.id} />
@@ -71,23 +83,33 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
       {scenes.length > 0 && (
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Sahneler</h2>
-          <div className="thumbs">
-            {scenes.map((sc, i) =>
-              sc.image ? (
-                <img key={i} src={`/api/media/${it.id}/${path.basename(sc.image)}?v=${v}`} alt={sc.text} title={sc.imagePrompt} />
-              ) : null,
-            )}
+          <p className="muted" style={{ marginTop: 0 }}>
+            Beğenmediğiniz sahnenin tarifini düzenleyip yeniden çizdirebilirsiniz; ses ve diğer sahneler korunur, video yeniden birleştirilir.
+          </p>
+          <div className="scenes">
+            {scenes.map((sc, i) => (
+              <div key={i} className="scene">
+                {sc.image ? (
+                  <img src={`/api/media/${it.id}/${path.basename(sc.image)}?v=${v}`} alt={sc.text} />
+                ) : (
+                  <div className="scene-empty">⏳</div>
+                )}
+                <div className="muted">{i + 1}. sahne · {sc.start.toFixed(1)}–{sc.end.toFixed(1)} sn</div>
+                <div className="scene-text">{sc.text}</div>
+                {["READY", "FAILED"].includes(it.status) && (
+                  <details>
+                    <summary className="muted">Yeniden çiz</summary>
+                    <form action={redrawScene}>
+                      <input type="hidden" name="id" value={it.id} />
+                      <input type="hidden" name="idx" value={i} />
+                      <textarea name="prompt" defaultValue={sc.imagePrompt} style={{ minHeight: 120, fontSize: 12 }} />
+                      <button className="secondary" style={{ marginTop: 6 }}>Bu sahneyi yeniden çiz</button>
+                    </form>
+                  </details>
+                )}
+              </div>
+            ))}
           </div>
-          <table style={{ marginTop: 10 }}>
-            <tbody>
-              {scenes.map((sc, i) => (
-                <tr key={i}>
-                  <td className="muted" style={{ whiteSpace: "nowrap" }}>{sc.start.toFixed(1)}–{sc.end.toFixed(1)} sn</td>
-                  <td>{sc.text}<div className="muted">{sc.imagePrompt}</div></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       )}
 

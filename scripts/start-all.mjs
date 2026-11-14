@@ -1,6 +1,7 @@
 // Paneli ve zamanlayıcıyı tek komutla birlikte başlatır: `npm run baslat`
 import { spawn, execSync } from "node:child_process";
 import net from "node:net";
+import fs from "node:fs";
 
 const PORT = Number(process.env.PORT || 3000);
 const isWin = process.platform === "win32";
@@ -19,6 +20,25 @@ if (!(await portFree(PORT))) {
   console.error(`- Tarayıcıda http://localhost:${PORT} adresini açmayı deneyin, ya da`);
   console.error(isWin ? "- Eski süreci kapatın:  taskkill /IM node.exe /F   ve tekrar  npm run baslat" : `- Eski süreci kapatın:  npx kill-port ${PORT}`);
   process.exit(1);
+}
+
+if (!fs.existsSync(".next/BUILD_ID")) {
+  console.error("\nPanel henüz derlenmemiş. Önce  npm run kurulum  (veya Guncelle.bat) çalıştırın.");
+  process.exit(1);
+}
+
+// Panel hazır olunca tarayıcıyı bir kez aç (NO_BROWSER=1 ile kapatılabilir)
+let opened = !!process.env.NO_BROWSER;
+function openBrowser() {
+  if (opened) return;
+  opened = true;
+  const url = `http://localhost:${PORT}`;
+  const cmd = isWin ? `start "" ${url}` : process.platform === "darwin" ? `open ${url}` : `xdg-open ${url}`;
+  try {
+    execSync(cmd, { stdio: "ignore" });
+  } catch {
+    /* tarayıcı açılamadı, adres zaten yazdırıldı */
+  }
 }
 
 const procs = [
@@ -41,7 +61,10 @@ let stopping = false;
 const children = procs.map(([name, cmd]) => {
   const p = spawn(cmd, { shell: true, stdio: ["ignore", "pipe", "pipe"], detached: !isWin });
   const prefix = (d) => d.toString().split(/\r?\n/).filter(Boolean).map((l) => `[${name}] ${l}`).join("\n") + "\n";
-  p.stdout.on("data", (d) => process.stdout.write(prefix(d)));
+  p.stdout.on("data", (d) => {
+    process.stdout.write(prefix(d));
+    if (name === "panel" && /Ready/i.test(d.toString())) openBrowser();
+  });
   p.stderr.on("data", (d) => process.stderr.write(prefix(d)));
   p.on("exit", (code) => {
     if (stopping) return;

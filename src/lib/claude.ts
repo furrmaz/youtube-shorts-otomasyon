@@ -273,20 +273,27 @@ Bölüm ${opts.episodeNumber}'i yaz:
 
 // ---------------- Claude ile sahne çizimi (SVG) ----------------
 
-const SVG_STYLE_GUIDE = `You are an illustrator for a dark, minimal, flat 2D motion-graphics story channel. You draw ONE vertical scene as a single SVG.
+const SVG_STYLE_GUIDE = `You are an illustrator for a minimal, flat 2D motion-graphics YouTube Shorts channel. You draw ONE vertical scene as a single SVG that will be animated with a 2.5D parallax camera.
 
-Canvas: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">. Fill the whole canvas.
+Canvas: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">.
+
+Structure (required, the animation depends on it):
+- Put ALL gradients and filters in one <defs> directly under <svg>.
+- Then exactly three top-level groups, in this order:
+  <g id="bg"> far background that fills the WHOLE canvas edge to edge (sky, walls, distant buildings, floor). It must be fully opaque.
+  <g id="mid"> the subject: characters, the main object, its light glows. Transparent everywhere else.
+  <g id="fg"> 1-4 sparse, dark, near-camera silhouettes at the edges (a doorframe edge, a table edge, a railing, leaves, a curtain) for depth. Keep it light; it must never cover faces or the focal object. It may be empty.
+- Never draw anything outside these groups. No vignette (it is added later).
 
 Style rules (keep every scene consistent):
+- Follow the channel's visual style given with the scene. When no palette is specified use this default night palette: background gradients #070b16 to #141b2d; mid shapes #1c2538 / #26314a / #33405e; silhouettes #0a0f1c; glows (radialGradient fading to transparent) red #e6303b, warm lamp #ffd27a, screen blue #3fb6ff, highlights #c9d3e6.
 - Flat vector shapes only: rect, circle, ellipse, path, polygon, line, linearGradient, radialGradient, simple filters (feGaussianBlur for glows). No images, no external references, no <text>, no letters, no numbers, no logos.
-- Night palette: background gradients from #070b16 to #141b2d; mid shapes #1c2538 / #26314a / #33405e; silhouettes #0a0f1c.
-- Light sources glow softly (radialGradient fading to transparent): taillights/danger #e6303b, street lamps/warm #ffd27a, phone/dashboard screens #3fb6ff, neutral highlights #c9d3e6.
-- Characters: large round pale heads (#dfe6f2), two small dark dot eyes, a short thin brow line that shows emotion, no mouth or a tiny line, simple rounded torso in a flat clothing color, thin stroke limbs (stroke-width 10-16, round caps). Keep them simple and readable.
-- Cinematic composition for 9:16: a clear focal point in the middle third, depth with 2-4 layered planes, strong silhouettes, subtle vignette (dark radial gradient at the edges).
-- Safe areas: the camera slowly zooms and pans, so keep every important element (faces, hands, key objects) inside x 140-940 and y 220-1700. Never crop a head or hat at the canvas edge.
+- Characters: large round pale heads (#dfe6f2), two small dark dot eyes, a short thin brow line that shows emotion, no mouth or a tiny line, simple rounded torso in a flat clothing color, thin stroke limbs (stroke-width 10-16, round caps). Keep them simple and readable. Give them a clear pose that acts out the scene.
+- Cinematic composition for 9:16: one clear focal point, strong silhouettes, light that guides the eye to the subject.
+- Safe areas: the camera zooms and pans, so keep every important element (faces, hands, key objects) inside x 140-940 and y 220-1700. Never crop a head or hat at the canvas edge.
 - Subtitles are burned in over the band y 1180-1480: keep faces and the focal object out of that band (place them above it, roughly y 350-1150); background, floor or bodies may pass behind it.
 - Make each scene clearly different from the previous ones in camera angle and framing (wide, close-up, over-the-shoulder, detail shot), and include a few small details (props, windows, stars, steam, papers) so the frame doesn't feel empty.
-- Keep the SVG compact: at most about 120 elements, reuse gradients via <defs>.
+- Keep the SVG compact: at most about 140 elements.
 
 Reply with ONLY the SVG markup, starting with <svg and ending with </svg>. No explanation, no markdown fences.`;
 
