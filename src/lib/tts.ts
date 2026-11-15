@@ -79,3 +79,27 @@ export async function listVoices(apiKey: string): Promise<Voice[]> {
   const data = (await r.json()) as { voices: Voice[] };
   return data.voices;
 }
+
+/** ElevenLabs Speech-to-Text: ses/video dosyasındaki konuşmayı kelime zamanlarıyla çıkarır */
+export async function transcribe(filePath: string, language?: string): Promise<Word[]> {
+  const c = await cfg();
+  if (!c.elevenApiKey) throw new Error("ElevenLabs API anahtarı girilmemiş");
+  const audio = await fs.readFile(filePath);
+  const send = (model: string) => {
+    const form = new FormData();
+    form.append("model_id", model);
+    form.append("timestamps_granularity", "word");
+    form.append("tag_audio_events", "false");
+    if (language) form.append("language_code", language);
+    form.append("file", new Blob([audio], { type: "audio/mpeg" }), "audio.mp3");
+    return fetch("https://api.elevenlabs.io/v1/speech-to-text", { method: "POST", headers: { "xi-api-key": c.elevenApiKey }, body: form });
+  };
+  let r = await send("scribe_v2");
+  if (r.status === 400 || r.status === 422) r = await send("scribe_v1");
+  if (!r.ok) throw new Error(`ElevenLabs konuşma tanıma hatası ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  const j = (await r.json()) as { words?: { text: string; start: number | null; end: number | null; type: string }[] };
+  return (j.words ?? [])
+    .filter((w) => w.type === "word" && w.start != null && w.end != null)
+    .map((w) => ({ word: w.text.trim(), start: w.start!, end: w.end! }))
+    .filter((w) => w.word);
+}

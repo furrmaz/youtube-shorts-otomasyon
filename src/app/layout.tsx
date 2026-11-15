@@ -15,6 +15,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <nav>
             <Link href="/">Panel</Link>
             <Link href="/calendar">İçerik takvimi</Link>
+            <Link href="/clips">Demo klipleri</Link>
+            <Link href="/sales">Satış videoları</Link>
+            <Link href="/channels">Kanallar</Link>
             <Link href="/settings">Ayarlar</Link>
           </nav>
         </header>

@@ -89,6 +89,14 @@ Anahtar olmadan da her şey denenebilir: Ayarlar'da ses ve görsel sağlayıcıs
 >
 > Varsayılan API kotası günde 10.000 birimdir; her yükleme yaklaşık 1.600 birim harcar, yani günde ~6 video.
 
+## Çok kanal, ürün tanıtımı ve sosyal medya
+
+- **Kanallar:** Her kanalın kendi formatı (bilgi / hikâye / ürün tanıtımı), konusu, sesi, renkleri, logosu, yayın saatleri ve hesapları vardır. Üstteki seçiciyle kanal değiştirilir. Eski kurulum ilk açılışta otomatik olarak "ana kanal"a taşınır. Kanallar sayfasında Randıman ve Asistena için hazır profiller tek tıkla eklenir.
+- **Ürün tanıtımı:** Ürün adı, sorun, özellikler, hedef kitle ve çağrı girilir; Claude 30-45 sn'lik kancalı tanıtım yazar ve çizer. Sonda ürün adı, çağrı ve web adresiyle kapanış kartı çıkar. Claude sadece girilen bilgileri kullanır.
+- **Demo klipleri:** Yatay demo videosu yüklenir; Claude kareleri ve konuşma dökümünü inceleyip en iyi bölümleri seçer, dikey klip altyazı, müzik ve logoyla hazırlanır.
+- **Satış videoları:** Ürün kanalında sektör listesi için ayrı kısa videolar ve müşteriye gönderilecek hazır mesaj üretilir. Otomatik yayınlanmaz.
+- **TikTok / Instagram Reels:** Ayarlar → Sosyal medya bölümündeki adımlarla geliştirici uygulamaları oluşturulur, hesaplar kanal sayfasından bağlanır. TikTok uygulaması incelemeden geçene kadar videolar taslak olarak gider. YouTube ileri tarihli yayını kendisi yapar; TikTok ve Instagram'a yayın saati gelince yüklenir.
+
 ## Etkileşimli hikâye dizisi modu
 
 Ayarlar → Format → **Etkileşimli hikâye dizisi**. Bu modda:

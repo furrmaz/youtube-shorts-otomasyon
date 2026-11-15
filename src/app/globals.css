@@ -51,3 +51,18 @@ video { max-width: 100%; max-height: 640px; border-radius: 10px; background: #00
 .banner a { text-decoration: underline; color: inherit; }
 .banner.warn { background: #3a2a10; border: 1px solid #a8741a; color: #ffd27a; }
 .banner.info { background: #12253d; border: 1px solid #2d5f99; color: #cfe4ff; }
+.channelbar { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; background: var(--panel); border: 1px solid var(--border); border-left: 4px solid; border-radius: 10px; padding: 8px 14px; margin-bottom: 14px; font-size: 14px; }
+.switch { display: flex; gap: 8px; align-items: center; }
+.switch select { width: auto; min-width: 220px; }
+.chgrid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.chcard { border-top: 4px solid; }
+.chcard img { width: 40px; height: 40px; object-fit: contain; border-radius: 8px; background: #0c0e12; }
+.pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: #2a3040; margin-right: 4px; }
+.pill.on { background: #1d5c3a; }
+.steps { margin: 6px 0 0; padding-left: 20px; font-size: 13px; color: var(--muted); }
+.steps li { margin: 3px 0; }
+.steps code, .muted code { background: #0c0e12; padding: 1px 5px; border-radius: 4px; }
+.sharebox { width: 100%; min-height: 90px; font-size: 13px; }
+.colors { display: flex; gap: 12px; }
+.colors input[type=color] { width: 56px; height: 36px; padding: 2px; }
+@media (max-width: 700px) { .two { grid-template-columns: 1fr; } }

@@ -15,14 +15,25 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
   const it = await prisma.contentItem.findUnique({ where: { id }, include: { logs: { orderBy: { id: "desc" }, take: 30 } } });
   if (!it) notFound();
   const s = await getSettings();
-  const yt = await prisma.youtubeAccount.findUnique({ where: { id: 1 } });
-  const scenes: Scene[] = it.scenes ? JSON.parse(it.scenes) : [];
+  const ch = it.channelId ? await prisma.channel.findUnique({ where: { id: it.channelId }, include: { connections: true } }) : null;
+  const targets = ch
+    ? ([
+        ["youtube", "YouTube", ch.toYoutube],
+        ["tiktok", "TikTok", ch.toTiktok],
+        ["instagram", "Instagram", ch.toInstagram],
+      ] as const).filter(([k, , on]) => on && ch.connections.some((c) => c.platform === k))
+    : [];
+  const plog: Record<string, { ok?: string; error?: string; at?: string }> = it.platformLog ? JSON.parse(it.platformLog) : {};
+  const back = it.kind === "clip" ? ["/clips", "Demo klipleri"] : it.kind === "sales" ? ["/sales", "Satış videoları"] : ["/calendar", "Takvim"];
+  const parsed: unknown = it.scenes ? JSON.parse(it.scenes) : [];
+  // Demo kliplerinde "scenes" sahne listesi değil, kesim planıdır
+  const scenes: Scene[] = Array.isArray(parsed) ? parsed : [];
   const v = it.updatedAt.getTime();
   const busy = ["WRITING", "PRODUCING", "UPLOADING"].includes(it.status);
 
   return (
     <>
-      <p><Link href="/calendar">← Takvim</Link></p>
+      <p><Link href={back[0]}>← {back[1]}</Link>{ch && <span className="muted"> · {ch.name}</span>}</p>
       <h1>{it.title}</h1>
       <div className="card row">
         <span className={`badge ${it.status}`}>{STATUS_TR[it.status]}</span>
@@ -36,6 +47,23 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
         {it.status === "READY" && !it.autoUpload && <span className="muted">Otomatik yüklenmeyecek, kontrol edip yükleyin</span>}
       </div>
       {it.error && <div className="card err">{it.error}</div>}
+      {(Object.keys(plog).length > 0 || it.tiktokId || it.instagramId) && (
+        <div className="card row">
+          <b>Platformlar:</b>
+          {it.youtubeVideoId && <a href={`https://youtube.com/shorts/${it.youtubeVideoId}`} target="_blank">YouTube ✓</a>}
+          {plog.youtube?.error && <span className="err">YouTube: {plog.youtube.error}</span>}
+          {it.tiktokId && <span className="pill on">TikTok {it.tiktokId.startsWith("taslak:") ? "✓ taslak olarak gönderildi (TikTok uygulamasından paylaşın)" : "✓"}</span>}
+          {plog.tiktok?.error && <span className="err">TikTok: {plog.tiktok.error}</span>}
+          {it.instagramId && <span className="pill on">Instagram ✓</span>}
+          {plog.instagram?.error && <span className="err">Instagram: {plog.instagram.error}</span>}
+        </div>
+      )}
+      {it.shareText && (
+        <div className="card">
+          <label style={{ marginTop: 0 }}>Müşteriye gönderilecek mesaj ({it.sector})</label>
+          <textarea className="sharebox" readOnly defaultValue={it.shareText} />
+        </div>
+      )}
 
       <div className="card row">
         {it.status === "DRAFT" && (
@@ -69,7 +97,9 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
         {it.status === "READY" && (
           <form action={uploadNow}>
             <input type="hidden" name="id" value={it.id} />
-            <button disabled={!yt}>{yt ? "YouTube'a yükle" : "Önce kanal bağlayın"}</button>
+            <button disabled={!targets.length}>
+              {targets.length ? `Şimdi yayınla (${targets.map((t) => t[1]).join(", ")})` : "Önce kanala hesap bağlayın"}
+            </button>
           </form>
         )}
       </div>
