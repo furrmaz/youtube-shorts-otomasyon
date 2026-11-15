@@ -1,68 +1,79 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getSettings } from "@/lib/settings";
+import { channelSettings } from "@/lib/channels";
+import { currentChannel } from "@/lib/current-channel";
 import { formatLocal } from "@/lib/time";
-import { disconnectYoutube, quickVideo, refreshStatsNow } from "@/app/actions";
+import { quickVideo, refreshStatsNow } from "@/app/actions";
 import { STATUS_TR } from "@/app/status";
 
 export const dynamic = "force-dynamic";
 
-export default async function Dashboard({ searchParams }: { searchParams: Promise<{ yt?: string; msg?: string }> }) {
-  const { yt, msg } = await searchParams;
-  const s = await getSettings();
-  const account = await prisma.youtubeAccount.findUnique({ where: { id: 1 } });
-  const counts = await prisma.contentItem.groupBy({ by: ["status"], _count: true });
+export default async function Dashboard() {
+  const ch = await currentChannel();
+  const s = await channelSettings(ch.id);
+  const cid = ch.id;
+  const conns = await prisma.connection.findMany({ where: { channelId: cid } });
+  const account = conns.find((c) => c.platform === "youtube");
+  const counts = await prisma.contentItem.groupBy({ by: ["status"], where: { channelId: cid }, _count: true });
   const count = (k: string) => counts.find((c) => c.status === k)?._count ?? 0;
   const upcoming = await prisma.contentItem.findMany({
-    where: { status: { not: "UPLOADED" }, publishAt: { gte: new Date(Date.now() - 86400_000) } },
+    where: { channelId: cid, status: { not: "UPLOADED" }, publishAt: { gte: new Date(Date.now() - 86400_000) } },
     orderBy: { publishAt: "asc" },
     take: 10,
   });
-  const recent = await prisma.contentItem.findMany({ where: { status: "UPLOADED" }, orderBy: { publishAt: "desc" }, take: 5 });
+  const recent = await prisma.contentItem.findMany({ where: { channelId: cid, status: "UPLOADED" }, orderBy: { publishAt: "desc" }, take: 5 });
   const since30 = new Date(Date.now() - 30 * 86400_000);
   const agg = await prisma.contentItem.aggregate({
-    where: { status: "UPLOADED", publishAt: { gte: since30 }, views: { not: null } },
+    where: { channelId: cid, status: "UPLOADED", publishAt: { gte: since30 }, views: { not: null } },
     _sum: { views: true, likes: true, comments: true },
     _avg: { views: true },
     _count: true,
   });
   const top = await prisma.contentItem.findMany({
-    where: { views: { not: null } },
+    where: { channelId: cid, views: { not: null } },
     orderBy: { views: "desc" },
     take: 5,
   });
   const fmt = (n: number | null | undefined) => Math.round(n ?? 0).toLocaleString("tr-TR");
-  const logs = await prisma.jobLog.findMany({ orderBy: { id: "desc" }, take: 40 });
+  const logs = await prisma.jobLog.findMany({
+    where: { OR: [{ item: { channelId: cid } }, { itemId: null }] },
+    orderBy: { id: "desc" },
+    take: 40,
+  });
+  const PLAT = [
+    ["youtube", "YouTube", ch.toYoutube],
+    ["tiktok", "TikTok", ch.toTiktok],
+    ["instagram", "Instagram", ch.toInstagram],
+  ] as const;
 
   return (
     <>
-      <h1>Panel</h1>
+      <h1>Panel · {ch.name}</h1>
       {upcoming.some((u) => ["WRITING", "PRODUCING", "UPLOADING"].includes(u.status)) && <meta httpEquiv="refresh" content="15" />}
-      {yt === "ok" && <div className="card">YouTube kanalı bağlandı ✓</div>}
-      {yt === "err" && <div className="card err">YouTube bağlantısı başarısız: {msg}</div>}
-
       <div className="card row">
-        {account ? (
-          <>
-            <span>📺 Bağlı kanal: <b>{account.channelTitle}</b></span>
-            <form action={disconnectYoutube} style={{ marginLeft: "auto" }}>
-              <button className="secondary">Bağlantıyı kes</button>
-            </form>
-          </>
-        ) : (
-          <>
-            <span>YouTube kanalı bağlı değil.</span>
-            <a className="btn" href="/api/youtube/connect" style={{ marginLeft: "auto" }}>YouTube kanalını bağla</a>
-          </>
-        )}
+        {PLAT.map(([k, label, on]) => {
+          const c = conns.find((x) => x.platform === k);
+          return (
+            <span key={k} className={`pill ${c && on ? "on" : ""}`} title={on ? "" : "Bu kanalda kapalı"}>
+              {label}: {c ? c.accountName : "bağlı değil"}{!on && " (kapalı)"}
+            </span>
+          );
+        })}
+        <Link href={`/channels/${cid}#baglantilar`} style={{ marginLeft: "auto" }}>Hesapları yönet</Link>
       </div>
 
       <form action={quickVideo} className="card">
-        <h2 style={{ marginTop: 0 }}>{s.contentFormat === "story" ? "Yeni bölüm üret" : "Yeni video üret"}</h2>
+        <h2 style={{ marginTop: 0 }}>{s.contentFormat === "story" ? "Yeni bölüm üret" : s.contentFormat === "promo" ? "Yeni tanıtım videosu üret" : "Yeni video üret"}</h2>
         <div className="row">
           <input
             name="topic"
-            placeholder={s.contentFormat === "story" ? "Bu bölüm için not (isteğe bağlı)" : "Konu (isteğe bağlı, boşsa Claude nişten seçer)"}
+            placeholder={
+              s.contentFormat === "story"
+                ? "Bu bölüm için not (isteğe bağlı)"
+                : s.contentFormat === "promo"
+                  ? "Açı (isteğe bağlı, ör. akşam kaçan çağrılar); boşsa Claude seçer"
+                  : "Konu (isteğe bağlı, boşsa Claude nişten seçer)"
+            }
             style={{ flex: 1, minWidth: 220 }}
           />
           <select name="mode" defaultValue="publish" style={{ width: "auto" }}>
@@ -78,7 +89,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
       <div className="card">
         <div className="muted" style={{ marginBottom: 8 }}>
-          Niş: <b>{s.niche || "— (Ayarlar'dan girin)"}</b> · Günde {s.videosPerDay} video · Saatler {s.publishTimes} · Ses: {s.ttsProvider} · Görsel: {s.imageProvider} · Otomatik: {s.autoProduce ? "açık" : "kapalı"}
+          {s.contentFormat === "promo" ? "Ürün" : "Niş"}: <b>{(s.contentFormat === "promo" ? ch.productName : s.niche) || "— (kanal ayarlarından girin)"}</b> · Günde {s.videosPerDay} video · Saatler {s.publishTimes} · Ses: {s.ttsProvider} · Görsel: {s.imageProvider} · Otomatik: {s.autoProduce ? "açık" : "kapalı"}
         </div>
         <div className="grid">
           {["DRAFT", "APPROVED", "PRODUCING", "READY", "UPLOADED", "FAILED"].map((k) => (
@@ -156,7 +167,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     <td style={{ whiteSpace: "nowrap" }}>{formatLocal(it.publishAt, s.timezone)}</td>
                     <td><Link href={`/items/${it.id}`}>{it.title}</Link></td>
                     <td style={{ whiteSpace: "nowrap" }}>{it.views != null ? `👁 ${fmt(it.views)}` : ""}</td>
-                    <td><a href={`https://youtube.com/shorts/${it.youtubeVideoId}`} target="_blank">YouTube&apos;da aç</a></td>
+                    <td>{it.youtubeVideoId && <a href={`https://youtube.com/shorts/${it.youtubeVideoId}`} target="_blank">YouTube&apos;da aç</a>}</td>
                   </tr>
                 ))}
               </tbody>

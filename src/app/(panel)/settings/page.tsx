@@ -1,11 +1,10 @@
 import { getSettings } from "@/lib/settings";
 import { cfg, mask } from "@/lib/config";
-import { listVoices, type Voice } from "@/lib/tts";
+import Link from "next/link";
 import { saveKeys, saveSettings, testKeys } from "@/app/actions";
+import { currentChannel } from "@/lib/current-channel";
 
 export const dynamic = "force-dynamic";
-
-const LANGS = [["tr", "Türkçe"], ["en", "English"], ["de", "Deutsch"], ["es", "Español"], ["fr", "Français"], ["ar", "Arapça"], ["pt", "Português"]];
 
 function Secret({ name, label, value, help }: { name: string; label: string; value: string; help?: React.ReactNode }) {
   return (
@@ -27,84 +26,22 @@ function Secret({ name, label, value, help }: { name: string; label: string; val
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ saved?: string; test?: string }> }) {
   const s = await getSettings();
   const c = await cfg();
+  const ch = await currentChannel();
   const { saved, test } = await searchParams;
   const tests: Record<string, string> | null = test ? JSON.parse(test) : null;
-
-  let voices: Voice[] = [];
-  let voiceErr = "";
-  if (c.elevenApiKey) {
-    try {
-      voices = await listVoices(c.elevenApiKey);
-    } catch (e) {
-      voiceErr = (e as Error).message;
-    }
-  }
-  const voiceKnown = voices.some((v) => v.voice_id === s.elevenVoiceId);
 
   return (
     <>
       <h1>Ayarlar</h1>
       {saved && <div className="card">Kaydedildi ✓</div>}
 
-      <form action={saveSettings} className="card">
-        <h2 style={{ marginTop: 0 }}>Kanal ve içerik</h2>
-        <label>Format</label>
-        <select name="contentFormat" defaultValue={s.contentFormat}>
-          <option value="info">Bilgi videosu (45-60 sn, günlük takvim)</option>
-          <option value="story">Etkileşimli hikâye dizisi (bölümler, A/B seçim, yorum oyları)</option>
-        </select>
-        <div className="muted">Formatı değiştirip kaydedince ilgili ayarlar açılır.</div>
-        <label>Niş / kategori</label>
-        <input name="niche" defaultValue={s.niche} placeholder="ör. uzay ve astronomi gerçekleri, finansal okuryazarlık, tarih" />
-        <div className="two">
-          <div>
-            <label>Dil</label>
-            <select name="language" defaultValue={s.language}>
-              {LANGS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Kanal tonu</label>
-            <input name="channelStyle" defaultValue={s.channelStyle} />
-          </div>
-        </div>
-        {s.contentFormat === "story" && (
-          <div className="card" style={{ background: "#0c0e12", marginTop: 12 }}>
-            <b>Hikâye dizisi</b>
-            <p className="muted" style={{ margin: "4px 0 0" }}>
-              Boş bırakılan alanları Claude ilk bölümde doldurur. Her bölüm A/B seçimiyle biter; sonraki bölüm yorumlarda en çok
-              yazılan seçime göre devam eder.
-            </p>
-            <div className="two">
-              <div>
-                <label>Dizi adı</label>
-                <input name="seriesTitle" defaultValue={s.seriesTitle} placeholder="ör. Son Şerit" />
-              </div>
-              <div>
-                <label>Bölüm süresi (dakika, en fazla 2.8)</label>
-                <input name="storyMinutes" type="number" step="0.1" min={1} max={2.8} defaultValue={s.storyMinutes} />
-              </div>
-            </div>
-            <label>Dizinin konusu</label>
-            <textarea name="seriesPremise" defaultValue={s.seriesPremise} style={{ minHeight: 80 }}
-              placeholder="ör. Gece yarısı kilitlenen bir otoyolda mahsur kalan sürücüler; telsizden gelen tuhaf anonslar…" />
-            <label>Karakterlerin görünüşü (İngilizce, görsel tutarlılık için)</label>
-            <textarea name="seriesCharacters" defaultValue={s.seriesCharacters} style={{ minHeight: 70 }}
-              placeholder="ör. Driver: round pale head, short dark hair, grey hoodie…" />
-          </div>
-        )}
-        {s.contentFormat !== "story" && (
-          <>
-            <input type="hidden" name="seriesTitle" value={s.seriesTitle} />
-            <input type="hidden" name="seriesPremise" value={s.seriesPremise} />
-            <input type="hidden" name="seriesCharacters" value={s.seriesCharacters} />
-            <input type="hidden" name="storyMinutes" value={s.storyMinutes} />
-          </>
-        )}
-        <label>Görsel stil (tüm sahnelerde aynı, İngilizce önerilir)</label>
-        <textarea name="visualStyle" defaultValue={s.visualStyle} style={{ minHeight: 70 }} />
+      <div className="card">
+        Konu, ses, renk, logo, yayın saatleri ve hesap bağlantıları artık her kanalda ayrı:{" "}
+        <Link href={`/channels/${ch.id}`}>{ch.name} kanal ayarları</Link> · <Link href="/channels">tüm kanallar</Link>
+      </div>
 
-        <h2>Ses ve görsel üretimi</h2>
+      <form action={saveSettings} className="card">
+        <h2 style={{ marginTop: 0 }}>Üretim (tüm kanallar)</h2>
         <div className="two">
           <div>
             <label>Seslendirme</label>
@@ -112,25 +49,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <option value="elevenlabs">ElevenLabs</option>
               <option value="mock">Deneme (sessiz, anahtar gerekmez)</option>
             </select>
-          </div>
-          <div>
-            <label>ElevenLabs sesi</label>
-            {voices.length > 0 ? (
-              <select name="elevenVoiceId" defaultValue={s.elevenVoiceId.startsWith("sk_") ? "" : s.elevenVoiceId}>
-                <option value="">— ses seçin —</option>
-                {!voiceKnown && s.elevenVoiceId && !s.elevenVoiceId.startsWith("sk_") && <option value={s.elevenVoiceId}>{s.elevenVoiceId}</option>}
-                {voices.map((v) => (
-                  <option key={v.voice_id} value={v.voice_id}>
-                    {v.name}
-                    {v.labels ? ` · ${Object.values(v.labels).filter(Boolean).slice(0, 3).join(", ")}` : ""}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input name="elevenVoiceId" defaultValue={s.elevenVoiceId} placeholder="Ses ID (anahtarı girince liste çıkar)" />
-            )}
-            {voiceErr && <div className="err">{voiceErr}</div>}
-            {s.elevenVoiceId.startsWith("sk_") && <div className="err">Bu alana API anahtarı girilmiş; listeden bir ses seçip kaydedin.</div>}
           </div>
           <div>
             <label>Görsel sağlayıcı</label>
@@ -141,20 +59,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <option value="mock">Deneme (degrade, anahtar gerekmez)</option>
             </select>
           </div>
-        </div>
-
-        <div className="two">
           <div>
-            <label>Altyazı</label>
-            <select name="subtitleStyle" defaultValue={s.subtitleStyle}>
-              <option value="karaoke">Büyük, kelime kelime vurgulu</option>
-              <option value="minimal">Sade, alt kısımda</option>
-              <option value="off">Kapalı</option>
-            </select>
+            <label>Saat dilimi</label>
+            <input name="timezone" defaultValue={s.timezone} />
           </div>
           <div>
-            <label>Filigran (ör. kanal adı, boşsa yok)</label>
-            <input name="watermark" defaultValue={s.watermark} placeholder="@kanaladi" />
+            <label>Yayından kaç saat önce üretilsin</label>
+            <input type="number" min={1} name="produceHoursAhead" defaultValue={s.produceHoursAhead} />
           </div>
         </div>
 
@@ -168,7 +79,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <option value="off">Müzik yok</option>
             </select>
             <div className="muted">
-              ElevenLabs seçilirse ilk videolarda telifsiz parçalar üretilip <code>music</code> klasörüne kaydedilir (6 parçaya kadar), sonra bunlar dönüşümlü kullanılır.
+              ElevenLabs seçilirse kanalın müzik tarifine göre telifsiz parçalar üretilip <code>music</code> klasörüne kaydedilir, sonra dönüşümlü kullanılır.
             </div>
           </div>
           <div>
@@ -176,51 +87,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <input name="musicVolume" type="number" step="0.01" min={0} max={1} defaultValue={s.musicVolume} />
             <div className="muted">Konuşma sırasında müzik otomatik olarak kısılır.</div>
           </div>
-          <div style={{ gridColumn: "1 / -1" }}>
-            <label>Müzik tarifi (ElevenLabs için, İngilizce, boşsa formata uygun hazır tarif)</label>
-            <input name="musicPrompt" defaultValue={s.musicPrompt} placeholder="dark cinematic suspense underscore, slow pulsing synth, no vocals" />
-          </div>
         </div>
         <div className="checks">
           <label><input type="checkbox" name="sfx" defaultChecked={s.sfx} /> Sahne geçişlerinde hafif geçiş sesi</label>
           <label><input type="checkbox" name="particles" defaultChecked={s.particles} /> Havada süzülen ışık parçacıkları</label>
-          <label><input type="checkbox" name="progressBar" defaultChecked={s.progressBar} /> Üstte ilerleme çubuğu</label>
-          <label><input type="checkbox" name="hookText" defaultChecked={s.hookText} /> Bilgi videolarında ilk saniyelerde büyük başlık</label>
-        </div>
-
-        <h2>Yayın planı</h2>
-        <div className="two">
-          <div>
-            <label>Günde video sayısı</label>
-            <input type="number" min={1} max={5} name="videosPerDay" defaultValue={s.videosPerDay} />
-          </div>
-          <div>
-            <label>Yayın saatleri (virgülle, ör. 12:00, 19:00)</label>
-            <input name="publishTimes" defaultValue={s.publishTimes} />
-          </div>
-          <div>
-            <label>Saat dilimi</label>
-            <input name="timezone" defaultValue={s.timezone} />
-          </div>
-          <div>
-            <label>Gizlilik</label>
-            <select name="privacyStatus" defaultValue={s.privacyStatus}>
-              <option value="public">Herkese açık</option>
-              <option value="unlisted">Liste dışı</option>
-              <option value="private">Özel</option>
-            </select>
-          </div>
-          <div>
-            <label>Yayından kaç saat önce üretilsin</label>
-            <input type="number" min={1} name="produceHoursAhead" defaultValue={s.produceHoursAhead} />
-          </div>
-          <div>
-            <label>&nbsp;</label>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--text)" }}>
-              <input type="checkbox" name="autoProduce" defaultChecked={s.autoProduce} style={{ width: "auto" }} />
-              Otomatik üret ve yükle
-            </label>
-          </div>
+          <label><input type="checkbox" name="progressBar" defaultChecked={s.progressBar} /> Üstte ilerleme çubuğu (kanal renginde)</label>
+          <label><input type="checkbox" name="hookText" defaultChecked={s.hookText} /> İlk saniyelerde büyük başlık</label>
         </div>
         <div style={{ marginTop: 16 }}>
           <button>Kaydet</button>
@@ -283,6 +155,43 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <label>Uygulama adresi</label>
             <input name="appUrl" defaultValue={s.appUrl} placeholder={c.appUrl} />
           </div>
+        </div>
+
+        <h2 id="sosyal">Sosyal medya: TikTok</h2>
+        <ol className="steps">
+          <li><a href="https://developers.tiktok.com/" target="_blank">developers.tiktok.com</a>&apos;da giriş yapıp <b>Manage apps → Connect an app</b> ile uygulama oluşturun.</li>
+          <li><b>Products</b> kısmına <b>Login Kit</b> ve <b>Content Posting API</b> ekleyin; Content Posting API&apos;de <b>Direct Post</b>&apos;u açın. İzinler: <code>user.info.basic</code> <code>video.upload</code> <code>video.publish</code>.</li>
+          <li>
+            Login Kit → <b>Redirect URI</b>: TikTok sadece <code>https</code> kabul eder. Bilgisayarınızda çalıştığı için şunu yazın:{" "}
+            <code>https://localhost/tiktok-donus</code> ve aynısını aşağıdaki &quot;Yönlendirme adresi&quot;ne girin. İzin verince açılmayan sayfanın adresini kanal sayfasına yapıştırmanız yeterli. TikTok localhost&apos;u kabul etmezse kendi sitenizden bir adres kullanın (ör. <code>https://befware.com/tiktok</code>); sayfanın var olması gerekmez.
+          </li>
+          <li>Client Key ve Client Secret&apos;ı aşağıya girin. Uygulama TikTok incelemesinden geçene kadar videolar <b>taslak</b> olarak gider (TikTok uygulamanıza bildirim gelir, açıklamayı kontrol edip paylaşırsınız). Onaydan sonra kanal ayarından &quot;Doğrudan paylaş&quot;ı seçebilirsiniz.</li>
+        </ol>
+        <div className="two">
+          <div>
+            <label>TikTok Client Key</label>
+            <input name="tiktokClientKey" defaultValue={s.tiktokClientKey} autoComplete="off" />
+          </div>
+          <Secret name="tiktokClientSecret" label="TikTok Client Secret" value={s.tiktokClientSecret} />
+          <div>
+            <label>Yönlendirme adresi (Redirect URI)</label>
+            <input name="tiktokRedirectUri" defaultValue={s.tiktokRedirectUri} placeholder={`${c.appUrl}/api/tiktok/callback`} />
+          </div>
+        </div>
+
+        <h2>Sosyal medya: Instagram Reels</h2>
+        <ol className="steps">
+          <li>Instagram hesabını <b>profesyonel hesaba</b> çevirin ve bir <b>Facebook sayfasına</b> bağlayın (Asistena&apos;nın Instagram&apos;ı için de geçerli).</li>
+          <li><a href="https://developers.facebook.com/apps/" target="_blank">developers.facebook.com/apps</a>&apos;ta <b>Business</b> türünde uygulama oluşturun, <b>Instagram</b> ürününü (Facebook ile giriş) ekleyin.</li>
+          <li>App ID ve App Secret&apos;ı (Uygulama ayarları → Temel) aşağıya girin; böylece kanal sayfasına yapıştırdığınız anahtar süresiz sayfa anahtarına çevrilir.</li>
+          <li>Hesabı bağlamak için kanal sayfasındaki Instagram adımlarını izleyin. Kendi hesaplarınız için Meta incelemesi gerekmez (uygulamada yönetici olmanız yeterli).</li>
+        </ol>
+        <div className="two">
+          <div>
+            <label>Meta App ID</label>
+            <input name="metaAppId" defaultValue={s.metaAppId} autoComplete="off" />
+          </div>
+          <Secret name="metaAppSecret" label="Meta App Secret" value={s.metaAppSecret} />
         </div>
 
         <h2>Panel şifresi</h2>

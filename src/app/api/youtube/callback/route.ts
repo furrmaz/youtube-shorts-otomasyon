@@ -12,12 +12,13 @@ export async function GET(req: NextRequest) {
   const jar = await cookies();
   const expected = jar.get("yt_state")?.value;
   jar.delete("yt_state");
+  const channel = (state ?? "").split(".")[1] ?? "";
   try {
     if (!code) throw new Error(req.nextUrl.searchParams.get("error") || "Kod yok");
-    if (!state || state !== expected) throw new Error("Geçersiz state, tekrar deneyin");
-    await handleCallback(code);
-    return NextResponse.redirect(`${appUrl}/?yt=ok`);
+    if (!state || state !== expected || !channel) throw new Error("Geçersiz state, tekrar deneyin");
+    await handleCallback(code, channel);
+    return NextResponse.redirect(`${appUrl}/channels/${channel}?yt=ok`);
   } catch (e) {
-    return NextResponse.redirect(`${appUrl}/?yt=err&msg=${encodeURIComponent((e as Error).message)}`);
+    return NextResponse.redirect(`${appUrl}/channels/${channel}?yt=err&msg=${encodeURIComponent((e as Error).message)}`);
   }
 }

@@ -2,13 +2,13 @@ import fs from "node:fs/promises";
 import { ffmpeg } from "./ffmpeg";
 import { cfg } from "./config";
 import { drawSceneSvg } from "./claude";
-import { prisma } from "./db";
 
 /**
  * Görsel sağlayıcı arayüzü. Yeni bir sağlayıcı (ör. Higgsfield) eklemek için
  * bu imzaya uyan bir fonksiyon yazıp PROVIDERS'a eklemek yeterli.
  */
-type ImageProvider = (prompt: string, outPath: string, seed: number) => Promise<void>;
+type ImageCtx = { characters?: string };
+type ImageProvider = (prompt: string, outPath: string, seed: number, ctx?: ImageCtx) => Promise<void>;
 
 async function download(url: string, outPath: string) {
   const r = await fetch(url);
@@ -102,9 +102,8 @@ export async function renderLayers(svg: string, imgPath: string): Promise<boolea
 }
 
 /** Claude sahneyi vektör çizim (SVG) olarak çizer; ek anahtar gerekmez */
-const claude: ImageProvider = async (prompt, outPath) => {
-  const s = await prisma.settings.findUnique({ where: { id: 1 } });
-  const svg = await drawSceneSvg(prompt, s?.contentFormat === "story" ? s.seriesCharacters : undefined);
+const claude: ImageProvider = async (prompt, outPath, _seed, ctx) => {
+  const svg = await drawSceneSvg(prompt, ctx?.characters || undefined);
   await fs.writeFile(outPath.replace(/\.png$/, ".svg"), svg);
   await svgToPng(svg, outPath);
   await renderLayers(svg, outPath);
@@ -112,13 +111,13 @@ const claude: ImageProvider = async (prompt, outPath) => {
 
 const PROVIDERS: Record<string, ImageProvider> = { fal, replicate, mock, claude };
 
-export async function generateImage(provider: string, prompt: string, outPath: string, seed: number) {
+export async function generateImage(provider: string, prompt: string, outPath: string, seed: number, ctx?: ImageCtx) {
   const fn = PROVIDERS[provider];
   if (!fn) throw new Error(`Bilinmeyen görsel sağlayıcı: ${provider}`);
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      return await fn(prompt, outPath, seed);
+      return await fn(prompt, outPath, seed, ctx);
     } catch (e) {
       lastErr = e;
       await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getSettings } from "@/lib/settings";
+import { channelSettings } from "@/lib/channels";
+import { currentChannel } from "@/lib/current-channel";
 import { calendarJob } from "@/lib/pipeline";
 import { formatLocal, toLocalInput } from "@/lib/time";
 import { approveAll, deleteItem, saveItem, setStatus, startCalendar } from "@/app/actions";
@@ -10,17 +11,18 @@ export const dynamic = "force-dynamic";
 
 export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ f?: string }> }) {
   const { f } = await searchParams;
-  const s = await getSettings();
-  const job = calendarJob();
+  const ch = await currentChannel();
+  const s = await channelSettings(ch.id);
+  const job = calendarJob(ch.id);
   const items = await prisma.contentItem.findMany({
-    where: f ? { status: f } : {},
+    where: { channelId: ch.id, kind: "standard", ...(f ? { status: f } : {}) },
     orderBy: { publishAt: "asc" },
   });
-  const drafts = await prisma.contentItem.count({ where: { status: "DRAFT" } });
+  const drafts = await prisma.contentItem.count({ where: { channelId: ch.id, status: "DRAFT" } });
 
   return (
     <>
-      <h1>İçerik takvimi</h1>
+      <h1>İçerik takvimi · {ch.name}</h1>
       {s.contentFormat === "story" ? (
         <div className="card">
           <b>Hikâye dizisi modu:</b> bölümler önceden değil, bir önceki bölümün yorum oylarına göre tek tek yazılır.
@@ -30,12 +32,12 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
       ) : (
       <div className="card">
         <form action={startCalendar} className="row">
-          <span>Claude nişi araştırsın ve</span>
+          <span>{s.contentFormat === "promo" ? "Claude hedef kitlenin dertlerini araştırsın ve" : "Claude nişi araştırsın ve"}</span>
           <input name="days" type="number" defaultValue={30} min={1} max={60} style={{ width: 80 }} />
           <span>günlük plan yazsın</span>
           <button disabled={job?.running || !s.niche}>Takvim oluştur</button>
         </form>
-        {!s.niche && <p className="err">Önce <Link href="/settings">Ayarlar</Link>&apos;dan niş girin.</p>}
+        {!s.niche && <p className="err">Önce <Link href={`/channels/${ch.id}`}>kanal ayarlarından</Link> niş veya ürün bilgisi girin.</p>}
         {job && (
           <p className={job.error ? "err" : "muted"}>
             {job.running ? "⏳ " : ""}

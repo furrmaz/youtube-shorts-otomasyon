@@ -319,3 +319,156 @@ export async function drawSceneSvg(prompt: string, characters?: string): Promise
   if (!m) throw new Error(`Claude geçerli SVG döndürmedi (stop_reason=${res.stop_reason})`);
   return m[0];
 }
+
+// ---------------- Ürün tanıtımı, satış videoları, demo kırpma ----------------
+
+type Brand = {
+  productName: string; productUrl: string; productProblem: string; productFeatures: string;
+  targetAudience: string; cta: string;
+};
+
+export function productBrief(c: Brand) {
+  return `Ürün: ${c.productName}
+Web: ${c.productUrl || "-"}
+Çözdüğü sorun: ${c.productProblem || "-"}
+Özellikler:
+${c.productFeatures || "-"}
+Hedef kitle: ${c.targetAudience || "-"}
+Harekete geçirici çağrı (CTA): ${c.cta || (c.productUrl ? `Detaylar: ${c.productUrl}` : "Profildeki bağlantıya tıkla")}`;
+}
+
+const PROMO_RULES = `Kurallar:
+- Metin 70-110 kelime (30-45 saniye seslendirme). İlk cümle güçlü bir kanca: hedef kitlenin yaşadığı somut bir sorun, şaşırtıcı bir durum ya da soru.
+- Akış: kanca → sorunun bedeli (zaman, para, stres) → ürün çözüm olarak → 1-2 somut özellik/kullanım anı → kısa CTA.
+- Ürün adını en az iki kez söyle. Sonda CTA'yı doğal bir cümleyle söyle.
+- Uydurma istatistik, müşteri adı, yorum, ödül veya fiyat YAZMA. Sadece verilen bilgilere dayan.
+- Reklam dili değil, işletme sahibine konuşan samimi ve net bir dil. Emoji, madde işareti, sahne yönergesi yazma.`;
+
+/** Ürün tanıtımı formatı: farklı açılardan `count` adet tanıtım videosu */
+export async function generatePromoChunk(
+  s: Omit<AppSettings, "id"> & Brand,
+  research: string,
+  count: number,
+  avoidTopics: string[],
+): Promise<CalendarItemT[]> {
+  const { api, model } = await client();
+  const res = await api.beta.messages.parse({
+    model,
+    max_tokens: 16000,
+    output_config: { effort: "medium", format: betaZodOutputFormat(CalendarChunk) },
+    system: `Sen B2B yazılım ürünleri için kısa dikey video (Shorts, Reels, TikTok) senaryoları yazan bir pazarlama senaristisin.
+${PROMO_RULES}
+Tüm çıktı ${langName(s.language)} dilinde olsun.`,
+    messages: [
+      {
+        role: "user",
+        content: `${productBrief(s)}
+Kanal tonu: ${s.channelStyle}
+
+${research ? `Hedef kitle hakkında araştırma notları:\n<research>\n${research}\n</research>\n` : ""}
+${avoidTopics.length ? `Daha önce kullanılan açılar/konular (tekrar etme):\n${avoidTopics.map((t) => "- " + t).join("\n")}\n` : ""}
+Tam olarak ${count} farklı tanıtım videosu yaz. Her biri farklı bir açıdan olsun; örnek açılar:
+günün kötü bir anı ve çözümü, tek bir özelliğe yakın plan, "bunu hâlâ elle mi yapıyorsun?", önce/sonra, 3 işaret (bu ürüne ihtiyacın olduğunu gösteren), sık yapılan bir hata, bir çalışanın/patronun bakış açısı, sektöre özel bir senaryo.
+topic alanına açıyı kısaca yaz. Açıklamanın sonuna web adresini ve 3-5 hashtag ekle.`,
+      },
+    ],
+    ...FALLBACK,
+  });
+  if (res.stop_reason === "refusal") throw new Error("Claude tanıtım isteğini reddetti");
+  if (!res.parsed_output) throw new Error(`Tanıtım çıktısı ayrıştırılamadı (stop_reason=${res.stop_reason})`);
+  return res.parsed_output.items.slice(0, count);
+}
+
+const SalesVideo = CalendarItem.extend({
+  shareText: z
+    .string()
+    .describe("Satış ekibinin videoyla birlikte WhatsApp/e-postayla göndereceği 2-4 cümlelik kişisel mesaj; sektöre hitap eder, web adresini içerir"),
+});
+export type SalesVideoT = z.infer<typeof SalesVideo>;
+
+/** Belirli bir sektördeki işletmeye gönderilecek, o sektöre özel tanıtım videosu */
+export async function writeSalesVideo(s: Omit<AppSettings, "id"> & Brand, sector: string): Promise<SalesVideoT> {
+  const { api, model } = await client();
+  const res = await api.beta.messages.parse({
+    model,
+    max_tokens: 8000,
+    output_config: { effort: "medium", format: betaZodOutputFormat(SalesVideo) },
+    system: `Sen B2B satış ekipleri için sektöre özel kısa tanıtım videoları yazan bir senaristsin. Video, satış temsilcisinin potansiyel müşteriye doğrudan göndereceği bir içeriktir.
+${PROMO_RULES}
+- Metin o sektördeki bir işletme sahibine hitap etsin: sektörün gerçek, gündelik bir anını (yoğun saat, kaçan telefon, yanlış sipariş vb.) canlandır.
+Tüm çıktı ${langName(s.language)} dilinde olsun.`,
+    messages: [
+      {
+        role: "user",
+        content: `${productBrief(s)}
+
+Sektör: ${sector}
+Bu sektördeki bir işletme için video yaz. topic alanı "${sector}" olsun. Başlıkta sektörü an.`,
+      },
+    ],
+    ...FALLBACK,
+  });
+  if (res.stop_reason === "refusal") throw new Error("Claude satış videosu isteğini reddetti");
+  if (!res.parsed_output) throw new Error("Satış videosu ayrıştırılamadı");
+  return res.parsed_output;
+}
+
+const DemoPlan = z.object({
+  segments: z
+    .array(z.object({ start: z.number().describe("saniye"), end: z.number().describe("saniye") }))
+    .describe("Kaynak videodan alınacak, zaman sırasına göre bölümler; toplam süre hedefe yakın"),
+  hook: z.string().describe("Videonun üstünde ilk saniyelerde görünecek 2-6 kelimelik kanca yazısı"),
+  voiceover: z
+    .string()
+    .describe("Seçilen görüntülerin üzerine okunacak anlatım metni (kanca ile başlar, CTA ile biter). Kaynakta konuşma varsa ve korunacaksa boş bırak."),
+  title: z.string().describe("Video başlığı, en fazla 90 karakter"),
+  description: z.string().describe("2-3 cümle açıklama + web adresi + 3-5 hashtag"),
+  tags: z.array(z.string()).describe("8-15 etiket"),
+});
+export type DemoPlanT = z.infer<typeof DemoPlan>;
+
+/**
+ * Yüklenen demo videosu: örnek kareler (+ varsa konuşma dökümü) Claude'a gösterilir;
+ * en çarpıcı bölümleri seçer, kanca ve anlatım metnini yazar.
+ */
+export async function planDemoClip(
+  s: Omit<AppSettings, "id"> & Brand,
+  opts: {
+    frames: { t: number; jpegBase64: string }[];
+    duration: number;
+    transcript: string | null;
+    targetSeconds: number;
+    narrate: boolean;
+    note?: string;
+  },
+): Promise<DemoPlanT> {
+  const { api, model } = await client();
+  const content: Anthropic.Beta.BetaContentBlockParam[] = [];
+  for (const f of opts.frames) {
+    content.push({ type: "text", text: `Kare @ ${f.t.toFixed(1)} sn` });
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: f.jpegBase64 } });
+  }
+  content.push({
+    type: "text",
+    text: `${productBrief(s)}
+
+Yukarıdaki kareler ${opts.duration.toFixed(0)} saniyelik bir ürün demo videosundan alındı (yatay ekran kaydı).
+${opts.transcript ? `Videodaki konuşmanın dökümü (zamanlı):\n${opts.transcript}\n` : "Videoda konuşma yok."}
+${opts.note ? `Kullanıcının notu: ${opts.note}\n` : ""}
+Bu videodan ${opts.targetSeconds} saniyeye yakın, dikey (9:16) bir tanıtım klibi çıkaracağız.
+- En çarpıcı, ürünün değerini en iyi gösteren 1-4 bölümü seç (toplam ≈ ${opts.targetSeconds} sn, her bölüm en az 3 sn, video sınırları içinde).
+- ${opts.narrate ? `Seçilen görüntülere uyan ${Math.round(opts.targetSeconds * 2.3)} kelime civarında bir anlatım metni yaz (voiceover).` : "Kaynaktaki konuşma korunacak; voiceover alanını boş bırak ve konuşmanın anlamlı cümlelerle başlayıp bittiği bölümleri seç."}
+${PROMO_RULES}`,
+  });
+  const res = await api.beta.messages.parse({
+    model,
+    max_tokens: 8000,
+    output_config: { effort: "medium", format: betaZodOutputFormat(DemoPlan) },
+    system: `Sen ürün demo videolarını sosyal medya için kısa dikey kliplere dönüştüren bir video editörü ve metin yazarısın. Tüm metinler ${langName(s.language)} dilinde olsun.`,
+    messages: [{ role: "user", content }],
+    ...FALLBACK,
+  });
+  if (res.stop_reason === "refusal") throw new Error("Claude demo analizini reddetti");
+  if (!res.parsed_output?.segments.length) throw new Error("Demo planı ayrıştırılamadı");
+  return res.parsed_output;
+}

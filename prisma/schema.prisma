@@ -51,6 +51,12 @@ model Settings {
   particles          Boolean @default(true)     // havada süzülen toz/ışık parçacıkları
   progressBar        Boolean @default(true)     // üstte ilerleme çubuğu
   hookText           Boolean @default(true)     // bilgi videolarında ilk saniyelerde büyük başlık
+  // TikTok (developers.tiktok.com uygulaması) ve Meta (Instagram) bağlantı bilgileri
+  tiktokClientKey    String  @default("")
+  tiktokClientSecret String  @default("")
+  tiktokRedirectUri  String  @default("")
+  metaAppId          String  @default("")
+  metaAppSecret      String  @default("")
   updatedAt         DateTime @updatedAt
 }
 
@@ -64,8 +70,81 @@ model YoutubeAccount {
   updatedAt    DateTime @updatedAt
 }
 
+// Kanal / marka: her uygulama (Randıman, Asistena…) kendi içeriği, görünümü ve hesaplarıyla
+model Channel {
+  id               String   @id @default(cuid())
+  name             String
+  // Format: info (bilgi) | story (etkileşimli hikâye) | promo (ürün tanıtımı)
+  contentFormat    String   @default("info")
+  niche            String   @default("")
+  language         String   @default("tr")
+  channelStyle     String   @default("Merak uyandıran, bilgilendirici, samimi")
+  visualStyle      String   @default("")
+  elevenVoiceId    String   @default("")
+  videosPerDay     Int      @default(1)
+  publishTimes     String   @default("18:00")
+  privacyStatus    String   @default("public")
+  autoProduce      Boolean  @default(true)
+  subtitleStyle    String   @default("karaoke")
+  watermark        String   @default("")
+  musicPrompt      String   @default("")
+  // Hikâye dizisi
+  seriesTitle      String   @default("")
+  seriesPremise    String   @default("")
+  seriesCharacters String   @default("")
+  storyMinutes     Float    @default(2.5)
+  // Ürün / marka
+  productName      String   @default("")
+  productUrl       String   @default("")
+  productProblem   String   @default("") // çözdüğü sorun
+  productFeatures  String   @default("") // satır satır özellikler
+  targetAudience   String   @default("")
+  cta              String   @default("") // ör. "Ücretsiz demo için: randiman.com"
+  sectors          String   @default("") // satış videoları için sektörler (satır satır)
+  primaryColor     String   @default("#ffd27a")
+  accentColor      String   @default("#e6303b")
+  logoPath         String?
+  // Hangi platformlara otomatik yüklenecek
+  toYoutube        Boolean  @default(true)
+  toTiktok         Boolean  @default(false)
+  toInstagram      Boolean  @default(false)
+  tiktokMode       String   @default("draft") // draft (TikTok uygulamasında taslak) | direct
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  items            ContentItem[]
+  connections      Connection[]
+}
+
+// Kanalın platform hesapları (YouTube, TikTok, Instagram)
+model Connection {
+  id           String    @id @default(cuid())
+  channelId    String
+  channel      Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  platform     String    // youtube | tiktok | instagram
+  accountId    String
+  accountName  String
+  accessToken  String
+  refreshToken String    @default("")
+  expiresAt    DateTime?
+  extra        String    @default("{}") // JSON: platforma özel bilgiler
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([channelId, platform])
+}
+
 model ContentItem {
   id             String    @id @default(cuid())
+  channelId      String?
+  channel        Channel?  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  // standard (takvim/yeni video) | sales (sektöre özel satış videosu) | clip (yüklenen demo videosundan)
+  kind           String    @default("standard")
+  sector         String?
+  shareText      String?   // satış videosu ile müşteriye gönderilecek mesaj
+  sourceVideo    String?   // clip: yüklenen kaynak video yolu
+  tiktokId       String?
+  instagramId    String?
+  platformLog    String?   // JSON: {tiktok: "hata/ok", instagram: ...}
   dayIndex       Int
   publishAt      DateTime
   topic          String
@@ -102,6 +181,7 @@ model ContentItem {
   logs           JobLog[]
 
   @@index([status, publishAt])
+  @@index([channelId, status])
 }
 
 model JobLog {

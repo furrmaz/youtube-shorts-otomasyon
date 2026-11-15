@@ -19,7 +19,8 @@ export async function authUrl(state: string) {
   return (await oauthClient()).generateAuthUrl({ access_type: "offline", prompt: "consent", scope: SCOPES, state });
 }
 
-export async function handleCallback(code: string) {
+/** OAuth dönüşü: kanalın YouTube bağlantısını kaydeder */
+export async function handleCallback(code: string, channelId: string) {
   const client = await oauthClient();
   const { tokens } = await client.getToken(code);
   client.setCredentials(tokens);
@@ -27,36 +28,40 @@ export async function handleCallback(code: string) {
   const ch = await yt.channels.list({ part: ["snippet"], mine: true });
   const channel = ch.data.items?.[0];
   if (!channel?.id) throw new Error("Bu Google hesabında YouTube kanalı bulunamadı");
-  const existing = await prisma.youtubeAccount.findUnique({ where: { id: 1 } });
+  const existing = await prisma.connection.findUnique({ where: { channelId_platform: { channelId, platform: "youtube" } } });
   const refresh = tokens.refresh_token ?? existing?.refreshToken;
   if (!refresh) throw new Error("Refresh token alınamadı; Google hesabından uygulama erişimini kaldırıp tekrar bağlayın");
   const data = {
-    channelId: channel.id,
-    channelTitle: channel.snippet?.title ?? "",
+    accountId: channel.id,
+    accountName: channel.snippet?.title ?? "",
     accessToken: tokens.access_token ?? "",
     refreshToken: refresh,
-    expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+    expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
   };
-  await prisma.youtubeAccount.upsert({ where: { id: 1 }, update: data, create: { id: 1, ...data } });
-  return data.channelTitle;
+  await prisma.connection.upsert({
+    where: { channelId_platform: { channelId, platform: "youtube" } },
+    update: data,
+    create: { channelId, platform: "youtube", ...data },
+  });
+  return data.accountName;
 }
 
-async function authedClient() {
-  const acc = await prisma.youtubeAccount.findUnique({ where: { id: 1 } });
-  if (!acc) throw new Error("YouTube kanalı bağlı değil");
+async function authedClient(channelId: string) {
+  const acc = await prisma.connection.findUnique({ where: { channelId_platform: { channelId, platform: "youtube" } } });
+  if (!acc) throw new Error("Bu kanala YouTube hesabı bağlı değil");
   const client = await oauthClient();
   client.setCredentials({
     access_token: acc.accessToken,
     refresh_token: acc.refreshToken,
-    expiry_date: acc.expiryDate?.getTime(),
+    expiry_date: acc.expiresAt?.getTime(),
   });
   client.on("tokens", async (t) => {
-    await prisma.youtubeAccount.update({
-      where: { id: 1 },
+    await prisma.connection.update({
+      where: { id: acc.id },
       data: {
         accessToken: t.access_token ?? acc.accessToken,
         ...(t.refresh_token ? { refreshToken: t.refresh_token } : {}),
-        ...(t.expiry_date ? { expiryDate: new Date(t.expiry_date) } : {}),
+        ...(t.expiry_date ? { expiresAt: new Date(t.expiry_date) } : {}),
       },
     });
   });
@@ -64,6 +69,7 @@ async function authedClient() {
 }
 
 export async function uploadShort(opts: {
+  channelId: string;
   filePath: string;
   title: string;
   description: string;
@@ -71,8 +77,9 @@ export async function uploadShort(opts: {
   language: string;
   privacyStatus: string;
   publishAt?: Date;
+  categoryId?: string;
 }): Promise<string> {
-  const auth = await authedClient();
+  const auth = await authedClient(opts.channelId);
   const yt = google.youtube({ version: "v3", auth });
   const title = (opts.title.includes("#Shorts") ? opts.title : `${opts.title} #Shorts`).slice(0, 100);
   const description = opts.description.includes("#Shorts") ? opts.description : `${opts.description}\n\n#Shorts`;
@@ -85,7 +92,7 @@ export async function uploadShort(opts: {
         title,
         description: description.slice(0, 4900),
         tags: opts.tags.slice(0, 30),
-        categoryId: "27", // Eğitim
+        categoryId: opts.categoryId ?? "27", // 27 Eğitim, 28 Bilim ve Teknoloji
         defaultLanguage: opts.language,
         defaultAudioLanguage: opts.language,
       },
@@ -104,8 +111,8 @@ export async function uploadShort(opts: {
 }
 
 /** Bölüm yorumlarındaki A/B oylarını sayar (her yorumcu bir kez) */
-export async function countVotes(videoId: string): Promise<{ a: number; b: number }> {
-  const auth = await authedClient();
+export async function countVotes(channelId: string, videoId: string): Promise<{ a: number; b: number }> {
+  const auth = await authedClient(channelId);
   const yt = google.youtube({ version: "v3", auth });
   const voters = new Map<string, "A" | "B">();
   let pageToken: string | undefined;
@@ -135,8 +142,8 @@ export async function countVotes(videoId: string): Promise<{ a: number; b: numbe
 export type VideoStats = { views: number; likes: number; comments: number };
 
 /** Yüklenen videoların izlenme/beğeni/yorum sayıları (50'şerli gruplar halinde) */
-export async function fetchStats(videoIds: string[]): Promise<Map<string, VideoStats>> {
-  const auth = await authedClient();
+export async function fetchStats(channelId: string, videoIds: string[]): Promise<Map<string, VideoStats>> {
+  const auth = await authedClient(channelId);
   const yt = google.youtube({ version: "v3", auth });
   const out = new Map<string, VideoStats>();
   for (let i = 0; i < videoIds.length; i += 50) {
