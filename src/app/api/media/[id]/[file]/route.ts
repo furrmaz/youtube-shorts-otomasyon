@@ -4,7 +4,7 @@ import { Readable } from "node:stream";
 import { MEDIA_DIR } from "@/lib/paths";
 import { isAuthed } from "@/lib/auth";
 
-const TYPES: Record<string, string> = { ".mp4": "video/mp4", ".png": "image/png", ".jpg": "image/jpeg", ".mp3": "audio/mpeg" };
+const TYPES: Record<string, string> = { ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".m4v": "video/mp4", ".png": "image/png", ".jpg": "image/jpeg", ".mp3": "audio/mpeg" };
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string; file: string }> }) {
   if (!(await isAuthed())) return new Response("Unauthorized", { status: 401 });

@@ -4,7 +4,8 @@ import { channelSettings } from "@/lib/channels";
 import { currentChannel } from "@/lib/current-channel";
 import { formatLocal } from "@/lib/time";
 import { quickVideo, refreshStatsNow } from "@/app/actions";
-import { STATUS_TR } from "@/app/status";
+import { STATUS_TR, cleanTitle, friendlyError } from "@/app/status";
+import { cfg } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +18,17 @@ export default async function Dashboard() {
   const counts = await prisma.contentItem.groupBy({ by: ["status"], where: { channelId: cid }, _count: true });
   const count = (k: string) => counts.find((c) => c.status === k)?._count ?? 0;
   const upcoming = await prisma.contentItem.findMany({
-    where: { channelId: cid, status: { not: "UPLOADED" }, publishAt: { gte: new Date(Date.now() - 86400_000) } },
+    // Gelecek planlar + tarihi geçmiş olsa da bekleyen (hazır, hatalı, işlemde) videolar
+    where: {
+      channelId: cid,
+      status: { not: "UPLOADED" },
+      OR: [
+        { publishAt: { gte: new Date(Date.now() - 86400_000) } },
+        { status: { in: ["READY", "FAILED", "WRITING", "PRODUCING", "UPLOADING"] } },
+      ],
+    },
     orderBy: { publishAt: "asc" },
-    take: 10,
+    take: 15,
   });
   const recent = await prisma.contentItem.findMany({ where: { channelId: cid, status: "UPLOADED" }, orderBy: { publishAt: "desc" }, take: 5 });
   const since30 = new Date(Date.now() - 30 * 86400_000);
@@ -40,6 +49,20 @@ export default async function Dashboard() {
     orderBy: { id: "desc" },
     take: 40,
   });
+  const k = await cfg();
+  const setup = [
+    { ok: !!k.anthropicApiKey, label: "Claude API anahtarı", href: "/settings#anahtarlar" },
+    { ok: s.ttsProvider === "elevenlabs" && !!k.elevenApiKey, label: "ElevenLabs anahtarı ve seslendirme \"ElevenLabs\"", href: "/settings#anahtarlar" },
+    { ok: s.ttsProvider !== "elevenlabs" || !!ch.elevenVoiceId, label: "Bu kanal için ses seçimi", href: `/channels/${cid}` },
+    { ok: s.imageProvider !== "mock", label: "Görsel sağlayıcı (Claude çizimi önerilir)", href: "/settings" },
+    {
+      ok: ch.contentFormat === "promo" ? !!(ch.productName && ch.productProblem) : ch.contentFormat === "story" ? true : !!ch.niche,
+      label: ch.contentFormat === "promo" ? "Ürün bilgileri" : "Kanal konusu (niş)",
+      href: `/channels/${cid}`,
+    },
+    { ok: conns.some((c) => c.platform === "youtube") || (!ch.toYoutube && conns.length > 0), label: "Yayın hesabı bağlantısı (YouTube / TikTok / Instagram)", href: `/channels/${cid}#baglantilar` },
+  ];
+  const missing = setup.filter((x) => !x.ok);
   const PLAT = [
     ["youtube", "YouTube", ch.toYoutube],
     ["tiktok", "TikTok", ch.toTiktok],
@@ -50,6 +73,19 @@ export default async function Dashboard() {
     <>
       <h1>Panel · {ch.name}</h1>
       {upcoming.some((u) => ["WRITING", "PRODUCING", "UPLOADING"].includes(u.status)) && <meta httpEquiv="refresh" content="15" />}
+      {missing.length > 0 && (
+        <div className="card">
+          <b>Kurulum: {setup.length - missing.length}/{setup.length} tamam</b>
+          <ul className="steps">
+            {setup.map((x) => (
+              <li key={x.label} style={{ listStyle: "none", marginLeft: -16 }}>
+                {x.ok ? "✅" : "⬜"} {x.ok ? x.label : <Link href={x.href}>{x.label}</Link>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="card row">
         {PLAT.map(([k, label, on]) => {
           const c = conns.find((x) => x.platform === k);
@@ -76,7 +112,7 @@ export default async function Dashboard() {
             }
             style={{ flex: 1, minWidth: 220 }}
           />
-          <select name="mode" defaultValue="publish" style={{ width: "auto" }}>
+          <select name="mode" defaultValue="review" style={{ width: "auto" }}>
             <option value="publish">Üret ve hemen yayınla</option>
             <option value="review">Üret, önce ben bakayım</option>
           </select>
@@ -144,9 +180,10 @@ export default async function Dashboard() {
                 <tr key={it.id}>
                   <td style={{ whiteSpace: "nowrap" }}>{formatLocal(it.publishAt, s.timezone)}</td>
                   <td>
-                    <Link href={`/items/${it.id}`}>{it.title}</Link>
+                    <Link href={`/items/${it.id}`}>{cleanTitle(it.title, it.status)}</Link>
+                    {it.kind !== "standard" && <span className="pill" style={{ marginLeft: 6 }}>{it.kind === "clip" ? "klip" : "satış"}</span>}
                     {it.progress && <div className="muted">⏳ {it.progress}</div>}
-                    {it.error && <div className="err">{it.error}</div>}
+                    {it.error && <div className="err">{friendlyError(it.error)}</div>}
                   </td>
                   <td><span className={`badge ${it.status}`}>{STATUS_TR[it.status]}</span></td>
                 </tr>
@@ -181,7 +218,7 @@ export default async function Dashboard() {
         {logs.length === 0 && <span className="muted">Kayıt yok.</span>}
         {logs.map((l) => (
           <div key={l.id} className={l.level}>
-            {formatLocal(l.createdAt, s.timezone)} {l.itemId ? <Link href={`/items/${l.itemId}`}>[video]</Link> : ""} {l.message}
+            {formatLocal(l.createdAt, s.timezone)} {l.itemId ? <Link href={`/items/${l.itemId}`}>[video]</Link> : ""} {l.level === "error" ? friendlyError(l.message) : l.message}
           </div>
         ))}
       </div>

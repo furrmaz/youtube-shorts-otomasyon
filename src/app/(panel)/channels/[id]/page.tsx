@@ -50,6 +50,12 @@ export default async function ChannelPage({ params, searchParams }: { params: Pr
       {sp.ok && <div className="card">{sp.ok} ✓</div>}
       {sp.msg && sp.yt !== "err" && <div className="card err">{sp.msg}</div>}
 
+      <div className="card row">
+        <span>🎬 Örnek video tarzı: {c.styleOn ? <b>açık</b> : c.styleProfile ? "çözümlendi, uygulanmadı" : "yok"}</span>
+        <Link href="/style" className="muted">Örnek video sayfası (seçili kanal için) →</Link>
+        {c.styleOn && <span className="muted">Görsel stil, altyazı, müzik ve ton aşağıda örneğe göre dolduruldu; değiştirebilirsin.</span>}
+      </div>
+
       <form action={saveChannel} className="card" encType="multipart/form-data">
         <input type="hidden" name="id" value={c.id} />
         <h2 style={{ marginTop: 0 }}>Kanal ve içerik</h2>

@@ -109,6 +109,11 @@ model Channel {
   toTiktok         Boolean  @default(false)
   toInstagram      Boolean  @default(false)
   tiktokMode       String   @default("draft") // draft (TikTok uygulamasında taslak) | direct
+  // Örnek video (tarz kopyalama)
+  styleRefPath     String   @default("")
+  styleProfile     String   @default("") // StyleProfile JSON
+  styleStatus      String   @default("") // "", "analiz", "hata: ..."
+  styleOn          Boolean  @default(false)
   sortOrder        Int      @default(0)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt

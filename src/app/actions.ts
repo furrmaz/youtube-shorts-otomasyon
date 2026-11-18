@@ -5,8 +5,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
-import { createQuickVideo, createSalesVideos, generateCalendar, produceItem, refreshStats, uploadItem } from "@/lib/pipeline";
+import { continueEpisode, retryEpisode, createQuickVideo, createSalesVideos, generateCalendar, produceItem, refreshStats, uploadItem } from "@/lib/pipeline";
 import { ensureChannels } from "@/lib/channels";
+import { analyzeReference, applyStyleToChannel, styleDir } from "@/lib/style";
 import { BEFWARE_PRESETS } from "@/lib/presets";
 import { CHANNEL_COOKIE, currentChannel } from "@/lib/current-channel";
 import { tiktokConnect } from "@/lib/tiktok";
@@ -409,6 +410,26 @@ export async function testKeys() {
       if (!c.falKey) throw new Error("anahtar girilmemiş");
       return "girildi (ilk görselde doğrulanır)";
     }),
+    check("TikTok", async () => {
+      const st = await getSettings();
+      if (!st.tiktokClientKey || !st.tiktokClientSecret) throw new Error("Client Key / Secret girilmemiş (gerekmiyorsa boş bırakın)");
+      const r = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_key: st.tiktokClientKey, client_secret: st.tiktokClientSecret, grant_type: "client_credentials" }),
+      });
+      const j = (await r.json()) as { access_token?: string; error_description?: string };
+      if (!j.access_token) throw new Error(j.error_description || `HTTP ${r.status}`);
+      return "uygulama anahtarları doğru";
+    }),
+    check("Meta (Instagram)", async () => {
+      const st = await getSettings();
+      if (!st.metaAppId || !st.metaAppSecret) throw new Error("App ID / Secret girilmemiş (gerekmiyorsa boş bırakın)");
+      const q = new URLSearchParams({ client_id: st.metaAppId, client_secret: st.metaAppSecret, grant_type: "client_credentials" });
+      const r = await fetch(`https://graph.facebook.com/v21.0/oauth/access_token?${q}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return "uygulama anahtarları doğru";
+    }),
     check("Google", async () => {
       if (!c.googleClientId || !c.googleClientSecret) throw new Error("Client ID / Secret girilmemiş");
       return "girildi, panelden kanalı bağlayın";
@@ -429,4 +450,70 @@ export async function refreshStatsNow() {
   await requireAuth();
   await refreshStats(true, (await currentChannel()).id);
   revalidatePath("/");
+}
+
+// ---------------- Örnek video (tarz) ----------------
+
+export async function applyStyle(f: FormData) {
+  await requireAuth();
+  const id = str(f, "id");
+  await applyStyleToChannel(id);
+  revalidatePath("/", "layout");
+  redirect("/style?applied=1");
+}
+
+export async function disableStyle(f: FormData) {
+  await requireAuth();
+  await prisma.channel.update({ where: { id: str(f, "id") }, data: { styleOn: false } });
+  revalidatePath("/", "layout");
+  redirect("/style");
+}
+
+export async function reanalyzeStyle(f: FormData) {
+  await requireAuth();
+  const id = str(f, "id");
+  await prisma.channel.update({ where: { id }, data: { styleStatus: "analiz" } });
+  void analyzeReference(id, str(f, "note"));
+  await new Promise((r) => setTimeout(r, 300));
+  redirect("/style");
+}
+
+export async function removeStyle(f: FormData) {
+  await requireAuth();
+  const id = str(f, "id");
+  await fs.rm(styleDir(id), { recursive: true, force: true });
+  await prisma.channel.update({ where: { id }, data: { styleRefPath: "", styleProfile: "", styleStatus: "", styleOn: false } });
+  revalidatePath("/", "layout");
+  redirect("/style");
+}
+
+// ---------------- Hikâye: elle devam ----------------
+
+export async function continueStory(f: FormData) {
+  await requireAuth();
+  const from = str(f, "id");
+  const choice = (["A", "B", "custom"].includes(str(f, "choice")) ? str(f, "choice") : "A") as "A" | "B" | "custom";
+  let to: string;
+  try {
+    const id = await continueEpisode(from, {
+      choice,
+      text: str(f, "text"),
+      nextA: str(f, "nextA"),
+      nextB: str(f, "nextB"),
+      note: str(f, "note"),
+      publishNow: str(f, "mode") === "publish",
+    });
+    to = `/items/${id}`;
+  } catch (e) {
+    to = `/items/${from}?msg=${encodeURIComponent((e as Error).message)}`;
+  }
+  redirect(to);
+}
+
+export async function rewriteEpisode(f: FormData) {
+  await requireAuth();
+  const id = str(f, "id");
+  await retryEpisode(id);
+  await new Promise((r) => setTimeout(r, 300));
+  revalidatePath(`/items/${id}`);
 }

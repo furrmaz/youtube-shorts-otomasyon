@@ -13,6 +13,7 @@ import { generateImage } from "./images";
 import { renderVideo, renderClip, timeScenes, probe, sampleFrames, type Scene, type Overlays } from "./video";
 import { musicFor } from "./music";
 import { uploadShort, countVotes, fetchStats } from "./youtube";
+import { friendlyError } from "./errors";
 import { uploadTiktok } from "./tiktok";
 import { uploadReel } from "./instagram";
 import { channelSettings, listChannels, type ChannelSettings } from "./channels";
@@ -24,7 +25,7 @@ function explain(e: unknown): string {
   if (/^401\b/.test(msg) && /x-api-key|authentication/.test(msg)) return "Claude API anahtarı geçersiz (Ayarlar → API anahtarları)";
   if (/^429\b/.test(msg)) return "Claude kullanım sınırına takıldı, biraz sonra tekrar deneyin";
   if (/credit balance/i.test(msg)) return "Claude hesabında kredi yok (console.anthropic.com → Billing)";
-  return msg;
+  return friendlyError(msg);
 }
 
 /** Açılış kancası için kısa başlık: başlığın ":" öncesi, etiket/emoji olmadan, en fazla ~42 karakter */
@@ -189,7 +190,17 @@ async function produceStandard(item: ContentItem, s: ChannelSettings, progress: 
     scenes = timeScenes(existing, words, duration).map((sc, i) => ({ ...sc, image: existing[i].image }));
   } else {
     const characters = isStory ? s.seriesCharacters : undefined;
-    const plan = isStory
+    // Örnek video tarzı açıksa sahne sayısı ölçülen ortalama sahne süresinden hesaplanır
+    const promoChars = `The product "${s.channel.productName}" is software: show it as a simple glowing app screen/dashboard with abstract UI blocks (no readable text). Brand colors ${s.channel.primaryColor} and ${s.channel.accentColor}.`;
+    const ref = s.styleGuide;
+    const refN = ref ? Math.min(40, Math.max(4, Math.round(duration / Math.max(1.2, ref.avgSceneSeconds)))) : 0;
+    const plan = ref
+      ? await planScenes(s, item.script, item.topic, {
+          minScenes: Math.max(3, refN - 2),
+          maxScenes: refN + 2,
+          characters: isStory ? characters : isPromo ? promoChars : undefined,
+        })
+      : isStory
       ? await planScenes(s, item.script, item.topic, {
           minScenes: Math.max(10, Math.round(s.storyMinutes * 6)),
           maxScenes: Math.max(14, Math.round(s.storyMinutes * 9)),
@@ -198,9 +209,7 @@ async function produceStandard(item: ContentItem, s: ChannelSettings, progress: 
       : await planScenes(s, item.script, item.topic, {
           minScenes: isPromo ? 7 : 9,
           maxScenes: isPromo ? 10 : 13,
-          characters: isPromo
-            ? `The product "${s.channel.productName}" is software: show it as a simple glowing app screen/dashboard with abstract UI blocks (no readable text). Brand colors ${s.channel.primaryColor} and ${s.channel.accentColor}.`
-            : undefined,
+          characters: isPromo ? promoChars : undefined,
         });
     const styled = plan.scenes.map((sc) => ({
       text: sc.text,
@@ -238,8 +247,8 @@ async function produceStandard(item: ContentItem, s: ChannelSettings, progress: 
   const outPath = path.join(dir, "short.mp4");
   await renderVideo({
     dir, scenes, audioPath, words, outPath,
-    motion: isStory ? "slow" : "normal",
-    transition: isStory ? "fade" : "varied",
+    motion: s.styleGuide?.motion ?? (isStory ? "slow" : "normal"),
+    transition: s.styleGuide?.transition ?? (isStory ? "fade" : "varied"),
     endCardSeconds: isStory && item.choiceA ? 5 : isPromo ? 3 : 0,
     musicVolume: s.musicVolume,
     musicPath: await musicFor(s, isStory, duration, (m, warn) => log(m, { itemId: id, level: warn ? "warn" : "info" })),
@@ -725,7 +734,9 @@ async function startEpisode(channelId: string, opts: { publishAt: Date; autoUplo
 }
 
 /** Dizi bilgisini hazırlar, önceki bölümün oylarını sayar ve bölümü yazar */
-async function finishEpisode(id: string, topicHint = "") {
+type EpisodeOverride = { chosen: string; text: string; nextChoices?: { a: string; b: string } };
+
+async function finishEpisode(id: string, topicHint = "", override?: EpisodeOverride) {
   try {
     const item = await prisma.contentItem.findUniqueOrThrow({ where: { id } });
     const channelId = item.channelId!;
@@ -752,7 +763,12 @@ async function finishEpisode(id: string, topicHint = "") {
     let chosenText: string | undefined;
     let chosen: string | null = null;
     const last = previous.at(-1);
-    if (last?.choiceA && last.choiceB) {
+    if (override && last) {
+      // Kullanıcı devamı panelden seçti/yazdı: oylar sayılmaz
+      chosen = override.chosen;
+      chosenText = override.text;
+      await log(`Bölüm ${last.episodeNumber} devamı elle seçildi → ${chosen}: ${chosenText}`, { itemId: id });
+    } else if (last?.choiceA && last.choiceB) {
       let a = last.votesA ?? 0;
       let b = last.votesB ?? 0;
       const yt = await prisma.connection.findUnique({ where: { channelId_platform: { channelId, platform: "youtube" } } });
@@ -781,6 +797,7 @@ async function finishEpisode(id: string, topicHint = "") {
       })),
       chosenText,
       topicHint,
+      nextChoices: override?.nextChoices,
     });
     const series = s.seriesTitle || "Hikâye";
     await prisma.contentItem.update({
@@ -807,6 +824,61 @@ async function finishEpisode(id: string, topicHint = "") {
     });
     await log(`Bölüm yazılamadı: ${explain(e)}`, { itemId: id, level: "error" });
   }
+}
+
+/**
+ * Panelden "Devam et": son bölümün devamını kullanıcının seçtiği (A/B) ya da yazdığı yönde hemen yazar ve üretir.
+ * İsteğe bağlı olarak yeni bölümün A/B seçenekleri de kullanıcıdan gelir.
+ */
+export async function continueEpisode(
+  fromId: string,
+  opts: { choice: "A" | "B" | "custom"; text: string; nextA?: string; nextB?: string; publishNow: boolean; note?: string },
+) {
+  const from = await prisma.contentItem.findUniqueOrThrow({ where: { id: fromId } });
+  if (from.episodeNumber == null || !from.channelId) throw new Error("Bu video bir hikâye bölümü değil");
+  const newer = await prisma.contentItem.findFirst({
+    where: { channelId: from.channelId, episodeNumber: { gt: from.episodeNumber } },
+    orderBy: { episodeNumber: "asc" },
+  });
+  if (newer) return newer.id; // devamı zaten var
+  const text =
+    opts.choice === "A" ? from.choiceA ?? "" : opts.choice === "B" ? from.choiceB ?? "" : opts.text.trim();
+  if (!text) throw new Error("Devam için bir seçenek seçin veya yazın");
+  if (!from.summary) await prisma.contentItem.update({ where: { id: fromId }, data: { summary: from.script.slice(0, 600) } });
+  const label = opts.choice === "custom" ? "Özel" : opts.choice;
+  const nextChoices = opts.nextA?.trim() && opts.nextB?.trim() ? { a: opts.nextA.trim(), b: opts.nextB.trim() } : undefined;
+  const id = await startEpisode(from.channelId, { publishAt: new Date(), autoUpload: opts.publishNow, topicHint: opts.note });
+  // Seçim kayda geçsin: yazım hata verirse "Bölümü yeniden yaz" aynı seçimle tekrar dener
+  await prisma.contentItem.update({
+    where: { id },
+    data: { chosen: `${label}: ${text}`, ...(nextChoices ? { choiceA: nextChoices.a, choiceB: nextChoices.b } : {}) },
+  });
+  void (async () => {
+    await finishEpisode(id, opts.note ?? "", { chosen: label, text, nextChoices });
+    const it = await prisma.contentItem.findUnique({ where: { id } });
+    if (it?.status !== "APPROVED") return;
+    await produceItem(id);
+    if (opts.publishNow) await publishItem(id, { force: true });
+  })();
+  return id;
+}
+
+/** Metni yazılamamış (hatalı) bölümü, varsa kayıtlı elle seçimle yeniden yazar ve üretir */
+export async function retryEpisode(id: string) {
+  const it = await prisma.contentItem.findUniqueOrThrow({ where: { id } });
+  if (it.episodeNumber == null || it.script.trim()) return;
+  await prisma.contentItem.update({ where: { id }, data: { status: "WRITING", error: null, title: `Bölüm ${it.episodeNumber} (yazılıyor…)` } });
+  const m = it.chosen?.match(/^([^:]+):\s*([\s\S]+)$/);
+  const override = m
+    ? { chosen: m[1], text: m[2], nextChoices: it.choiceA && it.choiceB ? { a: it.choiceA, b: it.choiceB } : undefined }
+    : undefined;
+  void (async () => {
+    await finishEpisode(id, "", override);
+    const done = await prisma.contentItem.findUnique({ where: { id } });
+    if (done?.status !== "APPROVED") return;
+    await produceItem(id);
+    if (done.autoUpload) await publishItem(id, { force: true });
+  })();
 }
 
 /**

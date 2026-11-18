@@ -18,6 +18,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const { panelPassword } = await cfg();
   if (!panelPassword) redirect("/");
   return (
+    <main>
     <div className="card" style={{ maxWidth: 360, margin: "60px auto" }}>
       <h1>Giriş</h1>
       {e && <p className="err">Şifre hatalı.</p>}
@@ -29,5 +30,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         </div>
       </form>
     </div>
+    </main>
   );
 }

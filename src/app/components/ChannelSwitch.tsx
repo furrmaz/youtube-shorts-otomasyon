@@ -8,7 +8,7 @@ export function ChannelSwitch({ channels, current }: { channels: { id: string; n
   return (
     <form action={selectChannel} className="switch">
       <input type="hidden" name="back" value={pathname} />
-      <span className="muted">Kanal:</span>
+      
       <select name="channel" defaultValue={current} onChange={(e) => e.currentTarget.form?.requestSubmit()}>
         {channels.map((c) => (
           <option key={c.id} value={c.id}>
