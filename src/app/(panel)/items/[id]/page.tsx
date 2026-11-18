@@ -5,13 +5,15 @@ import { prisma } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 import { formatLocal } from "@/lib/time";
 import type { Scene } from "@/lib/video";
-import { produceNow, redrawScene, regenerateMedia, rerenderVideo, setStatus, uploadNow } from "@/app/actions";
-import { STATUS_TR } from "@/app/status";
+import { continueStory, produceNow, rewriteEpisode, redrawScene, regenerateMedia, rerenderVideo, setStatus, uploadNow } from "@/app/actions";
+import { STATUS_TR, cleanTitle, friendlyError } from "@/app/status";
+import { exists } from "@/lib/paths";
 
 export const dynamic = "force-dynamic";
 
-export default async function ItemPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ItemPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string }> }) {
   const { id } = await params;
+  const { msg } = await searchParams;
   const it = await prisma.contentItem.findUnique({ where: { id }, include: { logs: { orderBy: { id: "desc" }, take: 30 } } });
   if (!it) notFound();
   const s = await getSettings();
@@ -24,17 +26,30 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
       ] as const).filter(([k, , on]) => on && ch.connections.some((c) => c.platform === k))
     : [];
   const plog: Record<string, { ok?: string; error?: string; at?: string }> = it.platformLog ? JSON.parse(it.platformLog) : {};
-  const back = it.kind === "clip" ? ["/clips", "Demo klipleri"] : it.kind === "sales" ? ["/sales", "Satış videoları"] : ["/calendar", "Takvim"];
+  const back = it.kind === "clip" ? ["/clips", "Demo klipleri"] : it.kind === "sales" ? ["/sales", "Satış videoları"] : it.episodeNumber != null ? ["/calendar", "Bölümler"] : ["/calendar", "Takvim"];
   const parsed: unknown = it.scenes ? JSON.parse(it.scenes) : [];
   // Demo kliplerinde "scenes" sahne listesi değil, kesim planıdır
   const scenes: Scene[] = Array.isArray(parsed) ? parsed : [];
+  // Dosyalar silinmiş/taşınmış olabilir: sayfada kırık resim yerine açık uyarı göster
+  const videoOk = !!it.videoPath && (await exists(it.videoPath));
+  const imgOk = await Promise.all(scenes.map((sc) => (sc.image ? exists(sc.image) : Promise.resolve(false))));
+  const needsRewrite = it.episodeNumber != null && it.status === "FAILED" && !it.script.trim();
+  const isLatestEpisode =
+    it.episodeNumber != null &&
+    !!it.choiceA &&
+    !!it.script.trim() &&
+    !(await prisma.contentItem.findFirst({ where: { channelId: it.channelId, episodeNumber: { gt: it.episodeNumber } } }));
+  const nextEp = it.episodeNumber != null
+    ? await prisma.contentItem.findFirst({ where: { channelId: it.channelId, episodeNumber: it.episodeNumber + 1 } })
+    : null;
   const v = it.updatedAt.getTime();
   const busy = ["WRITING", "PRODUCING", "UPLOADING"].includes(it.status);
 
   return (
     <>
       <p><Link href={back[0]}>← {back[1]}</Link>{ch && <span className="muted"> · {ch.name}</span>}</p>
-      <h1>{it.title}</h1>
+      <h1>{cleanTitle(it.title, it.status)}</h1>
+      {msg && <div className="card err">{msg}</div>}
       <div className="card row">
         <span className={`badge ${it.status}`}>{STATUS_TR[it.status]}</span>
         <span className="muted">Yayın: {formatLocal(it.publishAt, s.timezone)} · Deneme {it.attempts}</span>
@@ -46,7 +61,10 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
         {busy && <meta httpEquiv="refresh" content="8" />}
         {it.status === "READY" && !it.autoUpload && <span className="muted">Otomatik yüklenmeyecek, kontrol edip yükleyin</span>}
       </div>
-      {it.error && <div className="card err">{it.error}</div>}
+      {it.error && <div className="card err">{friendlyError(it.error)}</div>}
+      {it.videoPath && !videoOk && !busy && (
+        <div className="card err">Video dosyası bulunamadı (silinmiş veya taşınmış). &quot;Baştan üret&quot; ile yeniden oluşturabilirsin.</div>
+      )}
       {(Object.keys(plog).length > 0 || it.tiktokId || it.instagramId) && (
         <div className="card row">
           <b>Platformlar:</b>
@@ -73,13 +91,19 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
             <button className="secondary">Onayla</button>
           </form>
         )}
-        {["DRAFT", "APPROVED", "FAILED"].includes(it.status) && (
+        {needsRewrite && (
+          <form action={rewriteEpisode}>
+            <input type="hidden" name="id" value={it.id} />
+            <button>Bölümü yeniden yaz{it.chosen ? " (aynı seçimle)" : ""}</button>
+          </form>
+        )}
+        {["DRAFT", "APPROVED", "FAILED"].includes(it.status) && !needsRewrite && (
           <form action={produceNow}>
             <input type="hidden" name="id" value={it.id} />
             <button>Şimdi üret</button>
           </form>
         )}
-        {["READY", "FAILED"].includes(it.status) && (
+        {["READY", "FAILED"].includes(it.status) && !needsRewrite && (
           <form action={regenerateMedia}>
             <input type="hidden" name="id" value={it.id} />
             <button className="secondary">Baştan üret (yeni ses + görseller)</button>
@@ -91,22 +115,23 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
             <button className="secondary" title="Ses ve görseller korunur; müzik, efekt ve altyazı ayarları yeniden uygulanır">Sadece montajı yenile</button>
           </form>
         )}
-        {it.videoPath && (
+        {videoOk && (
           <a className="btn secondary" href={`/api/media/${it.id}/short.mp4?download=1`}>MP4 indir (TikTok / Reels)</a>
         )}
-        {it.status === "READY" && (
+        {it.status === "READY" && targets.length > 0 && (
           <form action={uploadNow}>
             <input type="hidden" name="id" value={it.id} />
-            <button disabled={!targets.length}>
-              {targets.length ? `Şimdi yayınla (${targets.map((t) => t[1]).join(", ")})` : "Önce kanala hesap bağlayın"}
-            </button>
+            <button>Şimdi yayınla ({targets.map((t) => t[1]).join(", ")})</button>
           </form>
+        )}
+        {it.status === "READY" && targets.length === 0 && ch && (
+          <Link className="btn secondary" href={`/channels/${ch.id}#baglantilar`}>Yayınlamak için hesap bağla</Link>
         )}
       </div>
 
-      {it.videoPath && (
+      {videoOk && (
         <div className="card">
-          <video controls src={`/api/media/${it.id}/short.mp4?v=${v}`} />
+          <video controls preload="metadata" src={`/api/media/${it.id}/short.mp4?v=${v}`} />
         </div>
       )}
 
@@ -119,7 +144,7 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
           <div className="scenes">
             {scenes.map((sc, i) => (
               <div key={i} className="scene">
-                {sc.image ? (
+                {sc.image && imgOk[i] ? (
                   <img src={`/api/media/${it.id}/${path.basename(sc.image)}?v=${v}`} alt={sc.text} />
                 ) : (
                   <div className="scene-empty">⏳</div>
@@ -150,7 +175,49 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
           <p><b>A:</b> {it.choiceA} {it.votesA != null && <span className="muted">({it.votesA} oy)</span>}</p>
           <p><b>B:</b> {it.choiceB} {it.votesB != null && <span className="muted">({it.votesB} oy)</span>}</p>
           {it.summary && <p className="muted">Özet: {it.summary}</p>}
+          {nextEp && (
+            <p>Devamı: <Link href={`/items/${nextEp.id}`}>{cleanTitle(nextEp.title, nextEp.status)}</Link></p>
+          )}
         </div>
+      )}
+
+      {isLatestEpisode && !busy && (
+        <form action={continueStory} className="card" id="devam">
+          <input type="hidden" name="id" value={it.id} />
+          <h2 style={{ marginTop: 0 }}>Bölüme devam et</h2>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Yorum oylarını beklemeden devamı sen seç: Bölüm {it.episodeNumber! + 1} bu yönde yazılıp hemen üretilir.
+            Otomatik modda oylar sayılır; buradan seçersen senin seçimin geçerli olur.
+          </p>
+          <div className="checks" style={{ gridTemplateColumns: "1fr" }}>
+            <label><input type="radio" name="choice" value="A" defaultChecked /> <b>A:</b> {it.choiceA}{it.votesA != null && <span className="muted"> ({it.votesA} oy)</span>}</label>
+            <label><input type="radio" name="choice" value="B" /> <b>B:</b> {it.choiceB}{it.votesB != null && <span className="muted"> ({it.votesB} oy)</span>}</label>
+            <label><input type="radio" name="choice" value="custom" /> Kendi devamımı yazacağım:</label>
+          </div>
+          <textarea name="text" placeholder="ör. Camı açmıyorsun ama telsizden adamın sesini duyuyorsun…" style={{ minHeight: 60, marginTop: 6 }} />
+          <details style={{ marginTop: 8 }}>
+            <summary className="muted">Yeni bölümün sonundaki seçenekleri de ben yazayım (isteğe bağlı)</summary>
+            <div className="two">
+              <div>
+                <label>Yeni A seçeneği</label>
+                <input name="nextA" placeholder="ör. Telsizi kapat" />
+              </div>
+              <div>
+                <label>Yeni B seçeneği</label>
+                <input name="nextB" placeholder="ör. Sesi takip et" />
+              </div>
+            </div>
+            <label>Bölüm için ek not</label>
+            <input name="note" placeholder="ör. sonunda yeni bir karakter ortaya çıksın" />
+          </details>
+          <div className="row" style={{ marginTop: 12 }}>
+            <select name="mode" defaultValue="review" style={{ width: "auto" }}>
+              <option value="review">Üret, önce ben bakayım</option>
+              <option value="publish">Üret ve hemen yayınla</option>
+            </select>
+            <button>Devam bölümünü üret</button>
+          </div>
+        </form>
       )}
 
       <div className="card">

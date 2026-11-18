@@ -1,6 +1,15 @@
 import type { Channel } from "@prisma/client";
 import { prisma } from "./db";
 import { getSettings, type AppSettings } from "./settings";
+import type { StyleProfileT } from "./claude";
+
+export function parseStyle(c: Pick<Channel, "styleProfile">): StyleProfileT | null {
+  try {
+    return c.styleProfile ? (JSON.parse(c.styleProfile) as StyleProfileT) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Eskiden genel ayarlarda olan, artık her kanala özel alanlar */
 export const CHANNEL_FIELDS = [
@@ -10,7 +19,7 @@ export const CHANNEL_FIELDS = [
 ] as const;
 
 /** Kanal içerikleri için birleşik ayarlar: genel ayarlar (anahtarlar, efektler) + kanalın kendi alanları */
-export type ChannelSettings = AppSettings & { channel: Channel };
+export type ChannelSettings = AppSettings & { channel: Channel; styleGuide: StyleProfileT | null };
 
 export const BRAND_VISUAL_STYLE = (c: Pick<Channel, "primaryColor" | "accentColor">) =>
   `clean minimalist flat 2D vector motion-graphics illustration, modern tech product explainer look, simple stylized people with large round heads and dot eyes, dark navy background (#0b1020 to #141b2d) with brand accent colors ${c.primaryColor} and ${c.accentColor}, soft glows on screens and key objects, rounded geometric shapes, clean UI cards and icons without readable text`;
@@ -59,7 +68,7 @@ export async function channelSettings(channelId: string | null | undefined): Pro
   const channel =
     (channelId && (await prisma.channel.findUnique({ where: { id: channelId } }))) ||
     (await prisma.channel.findFirstOrThrow({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }));
-  const merged = { ...s, channel } as ChannelSettings;
+  const merged = { ...s, channel, styleGuide: channel.styleOn ? parseStyle(channel) : null } as ChannelSettings;
   for (const f of CHANNEL_FIELDS) (merged as Record<string, unknown>)[f] = channel[f];
   if (!merged.visualStyle.trim()) merged.visualStyle = BRAND_VISUAL_STYLE(channel);
   if (!merged.niche.trim() && channel.productName) merged.niche = `${channel.productName}: ${channel.productProblem}`;

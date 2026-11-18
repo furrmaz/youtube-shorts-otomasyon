@@ -112,7 +112,7 @@ ${research}
 ${avoidTopics.length ? `Daha önce planlanan konular (tekrar etme):\n${avoidTopics.map((t) => "- " + t).join("\n")}\n` : ""}
 Tam olarak ${count} farklı Shorts videosu planla. Her biri:
 - Kanca ile başlayan, tek bir bilgiyi net anlatan, sonunda kısa bir merak/etkileşim cümlesi olan 110-150 kelimelik metin
-- Sadece doğruluğundan emin olduğun bilgiler`,
+- Sadece doğruluğundan emin olduğun bilgiler${styleBlock(s)}`,
       },
     ],
     ...FALLBACK,
@@ -152,12 +152,12 @@ export async function planScenes(
     messages: [
       {
         role: "user",
-        content: `Aşağıdaki Shorts metnini ${minS}-${maxS} sahneye böl. Sahne metinleri birleştirildiğinde orijinal metnin aynısı olmalı (sırayı ve kelimeleri değiştirme). Her sahne 3-7 saniye sürecek kadar metin içersin; izleyici sıkılmasın diye görüntü sık değişsin.
+        content: `Aşağıdaki Shorts metnini ${minS}-${maxS} sahneye böl. Sahne metinleri birleştirildiğinde orijinal metnin aynısı olmalı (sırayı ve kelimeleri değiştirme). ${styleOf(s) ? `Örnek videodaki tempoya uy: her sahne ortalama ${styleOf(s)!.avgSceneSeconds.toFixed(1)} saniye sürecek kadar metin içersin.` : "Her sahne 3-7 saniye sürecek kadar metin içersin; izleyici sıkılmasın diye görüntü sık değişsin."}
 
 Her sahne için bir görsel istemi yaz. Tüm görseller aynı çizim stilinde olacak:
 "${s.visualStyle}"
 İstemler İngilizce olsun, sadece sahnenin içeriğini anlatsın (stil ayrıca eklenecek), görselde yazı, harf, logo olmasın. Dikey (9:16) kompozisyon düşün, ana öğe ortada.
-Sinematik çekim açılarını çeşitlendir: geniş açı, sürücü koltuğundan bakış, ele yakın çekim (telefon, direksiyon, radyo), karakterin yüzüne yakın çekim, dikiz aynası vb.
+${styleOf(s) ? `Sahne kurgusunu örnek videodaki gibi yap: ${styleOf(s)!.sceneGuide}` : "Sinematik çekim açılarını çeşitlendir: geniş açı, yakın çekim, nesneye yakın plan, karakterin yüzüne yakın çekim, omuz üstü bakış vb."}
 ${opts.characters ? `Karakterler sahnede göründüğünde bu tariflere birebir uy (styleAnchor'a da ekle):\n${opts.characters}` : ""}
 
 Konu: ${topic}
@@ -231,6 +231,7 @@ export async function writeEpisode(
     previous: { episodeNumber: number; title: string; summary: string; choiceA: string; choiceB: string; chosen?: string | null }[];
     chosenText?: string; // önceki bölümde izleyicinin seçtiği seçenek
     topicHint?: string;
+    nextChoices?: { a: string; b: string }; // kullanıcının belirlediği bu bölümün seçenekleri
   },
 ): Promise<EpisodeT> {
   const words = Math.round(s.storyMinutes * 150);
@@ -261,7 +262,8 @@ Bölüm ${opts.episodeNumber}'i yaz:
 - İlk cümle güçlü bir kanca olsun (saat/mekân/tuhaf bir ayrıntı)
 - Gerilim adım adım artsın, bölüm tam karar anında dursun
 - Metnin son cümleleri seçimi sorsun: "Ne yaparsın? A: ... mı, yoksa B: ... mi? Kararını yorumlara yaz."
-- İki seçenek de makul ve merak uyandırıcı olsun, biri açıkça "doğru" olmasın`,
+- İki seçenek de makul ve merak uyandırıcı olsun, biri açıkça "doğru" olmasın
+${opts.nextChoices ? `- Bölüm şu iki seçenekle bitmeli (choiceA ve choiceB alanlarına da aynen yaz, hikâyeyi bu seçime doğru kur): A) ${opts.nextChoices.a}  B) ${opts.nextChoices.b}` : ""}${styleBlock(s)}`,
       },
     ],
     ...FALLBACK,
@@ -369,7 +371,7 @@ ${research ? `Hedef kitle hakkında araştırma notları:\n<research>\n${researc
 ${avoidTopics.length ? `Daha önce kullanılan açılar/konular (tekrar etme):\n${avoidTopics.map((t) => "- " + t).join("\n")}\n` : ""}
 Tam olarak ${count} farklı tanıtım videosu yaz. Her biri farklı bir açıdan olsun; örnek açılar:
 günün kötü bir anı ve çözümü, tek bir özelliğe yakın plan, "bunu hâlâ elle mi yapıyorsun?", önce/sonra, 3 işaret (bu ürüne ihtiyacın olduğunu gösteren), sık yapılan bir hata, bir çalışanın/patronun bakış açısı, sektöre özel bir senaryo.
-topic alanına açıyı kısaca yaz. Açıklamanın sonuna web adresini ve 3-5 hashtag ekle.`,
+topic alanına açıyı kısaca yaz. Açıklamanın sonuna web adresini ve 3-5 hashtag ekle.${styleBlock(s)}`,
       },
     ],
     ...FALLBACK,
@@ -471,4 +473,94 @@ ${PROMO_RULES}`,
   if (res.stop_reason === "refusal") throw new Error("Claude demo analizini reddetti");
   if (!res.parsed_output?.segments.length) throw new Error("Demo planı ayrıştırılamadı");
   return res.parsed_output;
+}
+
+// ---------------- Örnek video: tarz ve kurgu analizi ----------------
+
+const StyleProfileZ = z.object({
+  summary: z.string().describe("Videonun ne yaptığını ve neden işe yaradığını anlatan 2-4 cümle (Türkçe)"),
+  hookPattern: z.string().describe("İlk 2-3 saniyede ne oluyor: kanca türü ve kalıbı, örnekle (Türkçe)"),
+  structure: z.array(z.string()).describe("Videonun bölüm bölüm akışı, sırayla 4-8 adım; her biri yaklaşık süresiyle (Türkçe)"),
+  scriptGuide: z
+    .string()
+    .describe("Yeni metinler yazılırken uyulacak yazım kuralları: anlatıcı (ben/sen/o), cümle uzunluğu, ton, tekrar eden ifadeler, kapanış/CTA kalıbı (Türkçe, madde değil düz metin)"),
+  ending: z.string().describe("Video nasıl bitiyor: soru, CTA, seçim, döngü vb. (Türkçe)"),
+  visualStyle: z
+    .string()
+    .describe("Çizim/görsel stil tanımı, İngilizce, tek paragraf: teknik (flat vector, 3D, fotoğraf...), renk paleti hex kodlarıyla, ışık, karakter tasarımı, arka plan yoğunluğu. Görselde yazı olmasın."),
+  sceneGuide: z
+    .string()
+    .describe("Sahne kurgusu, İngilizce: çekim ölçekleri ve açılar, kompozisyon, sahnelerin nasıl değiştiği, ekranda neyin odakta olduğu"),
+  palette: z.array(z.string()).describe("Baskın 3-5 renk, #rrggbb"),
+  captionStyle: z.enum(["karaoke", "minimal", "off"]).describe("karaoke: büyük, kelime kelime vurgulu; minimal: altta sade; off: altyazı yok"),
+  captionNotes: z.string().describe("Altyazı/ekran yazısı gözlemleri: konum, büyüklük, renk, vurgu (Türkçe)"),
+  motion: z.enum(["slow", "normal"]).describe("Kamera/sahne hareketi yavaş ve sinematik mi, hızlı ve enerjik mi"),
+  transition: z.enum(["fade", "varied"]).describe("Geçişler sade (fade/kesme) mi, çeşitli efektli mi"),
+  voiceNotes: z.string().describe("Seslendirme: kadın/erkek, yaş hissi, ton, tempo, duygu; ElevenLabs'ta hangi tür ses seçilmeli (Türkçe)"),
+  musicPrompt: z.string().describe("Arka plan müziği tarifi, İngilizce, sözsüz (ElevenLabs müzik için)"),
+  channelTone: z.string().describe("Kanal tonu için tek satır (Türkçe), ör. 'gergin, gizemli, ikinci tekil şahıs'"),
+});
+export type StyleProfileT = z.infer<typeof StyleProfileZ> & {
+  seconds: number; // örnek videonun süresi
+  avgSceneSeconds: number; // ölçülen ortalama sahne süresi
+  wordsPerMinute: number | null; // ölçülen konuşma hızı
+  analyzedAt: string;
+};
+
+/** Örnek videonun karelerinden, konuşmasından ve ölçülen temposundan tarz profili çıkarır */
+export async function analyzeStyle(opts: {
+  frames: { t: number; jpegBase64: string }[];
+  duration: number;
+  transcript: string | null;
+  avgSceneSeconds: number;
+  cuts: number;
+  wordsPerMinute: number | null;
+  format: string;
+  note?: string;
+}) {
+  const { api, model } = await client();
+  const content: Anthropic.Beta.BetaContentBlockParam[] = [];
+  for (const f of opts.frames) {
+    content.push({ type: "text", text: `Kare @ ${f.t.toFixed(1)} sn` });
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: f.jpegBase64 } });
+  }
+  const FORMAT_TR: Record<string, string> = { info: "bilgi videosu", story: "etkileşimli hikâye dizisi", promo: "ürün tanıtımı" };
+  content.push({
+    type: "text",
+    text: `Yukarıdaki kareler ${opts.duration.toFixed(0)} saniyelik örnek bir dikey kısa videodan (Shorts/Reels/TikTok) eşit aralıklarla alındı.
+Ölçümler: ${opts.cuts} sahne kesmesi, ortalama sahne süresi ${opts.avgSceneSeconds.toFixed(1)} sn${opts.wordsPerMinute ? `, konuşma hızı dakikada ${Math.round(opts.wordsPerMinute)} kelime` : ""}.
+${opts.transcript ? `Konuşma dökümü:\n"""${opts.transcript}"""\n` : "Konuşma dökümü yok (ses yok ya da tanınamadı); metin yapısını karelerdeki yazılardan ve görsel akıştan çıkar."}
+${opts.note ? `Kullanıcının notu: ${opts.note}\n` : ""}
+Bu kanal "${FORMAT_TR[opts.format] ?? opts.format}" formatında yeni videolar üretecek ve bu örneğin tarzını ve kurgusunu taklit etmek istiyor: konu değil, BİÇİM kopyalanacak.
+Videoyu bir yapımcı gözüyle çözümle: kanca, akış, tempo, görsel dil, sahne kurgusu, altyazı, ses ve müzik. Tanımların, bu üretim hattının (çizim + seslendirme + altyazı + müzik) yeniden üretebileceği somut talimatlar olsun. Videodaki marka, kişi veya karakter adlarını kopyalama talimatı verme.`,
+  });
+  const res = await api.beta.messages.parse({
+    model,
+    max_tokens: 8000,
+    output_config: { effort: "medium", format: betaZodOutputFormat(StyleProfileZ) },
+    system: "Sen kısa dikey videoların neden işe yaradığını çözümleyen deneyimli bir video yapımcısı ve kurgucusun.",
+    messages: [{ role: "user", content }],
+    ...FALLBACK,
+  });
+  if (res.stop_reason === "refusal") throw new Error("Claude örnek video analizini reddetti");
+  if (!res.parsed_output) throw new Error("Tarz analizi ayrıştırılamadı");
+  return res.parsed_output;
+}
+
+/** Yazım istemlerine eklenen "örnek video tarzı" bölümü (tarz kapalıysa boş) */
+export const styleOf = (s: unknown) => (s as { styleGuide?: StyleProfileT | null }).styleGuide ?? null;
+
+export function styleBlock(s: unknown): string {
+  const p = styleOf(s);
+  if (!p) return "";
+  const words = p.wordsPerMinute ? Math.round((p.seconds / 60) * p.wordsPerMinute) : null;
+  return `
+
+ÖRNEK VİDEO TARZI (kullanıcı bu tarzı kopyalamak istiyor; uzunluk ve yapı için yukarıdaki genel kurallardan önceliklidir, doğruluk ve uydurmama kuralları geçerliliğini korur):
+- Kanca: ${p.hookPattern}
+- Akış: ${p.structure.join(" → ")}
+- Yazım: ${p.scriptGuide}
+- Bitiş: ${p.ending}
+- Hedef süre: yaklaşık ${Math.round(p.seconds)} saniye${words ? ` (≈ ${words} kelime)` : ""}
+Konuyu değil biçimi kopyala; örnekteki isimleri, markaları ve cümleleri aynen kullanma.`;
 }

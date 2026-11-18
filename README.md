@@ -97,6 +97,14 @@ Anahtar olmadan da her şey denenebilir: Ayarlar'da ses ve görsel sağlayıcıs
 - **Satış videoları:** Ürün kanalında sektör listesi için ayrı kısa videolar ve müşteriye gönderilecek hazır mesaj üretilir. Otomatik yayınlanmaz.
 - **TikTok / Instagram Reels:** Ayarlar → Sosyal medya bölümündeki adımlarla geliştirici uygulamaları oluşturulur, hesaplar kanal sayfasından bağlanır. TikTok uygulaması incelemeden geçene kadar videolar taslak olarak gider. YouTube ileri tarihli yayını kendisi yapar; TikTok ve Instagram'a yayın saati gelince yüklenir.
 
+## Örnek video (tarz kopyalama)
+
+Üst menüdeki **Örnek video** sayfasına beğendiğin bir kısa video yüklenir. Uygulama sahne kesmelerini ve konuşma hızını ölçer, Claude kareleri ve konuşma dökümünü inceleyip kancayı, akışı, yazım kurallarını, görsel stili, sahne kurgusunu, altyazı, ses ve müzik tarzını çıkarır. "Bu tarzı kanala uygula" denince kanalın yeni videoları bu biçimde yazılır, çizilir ve kurgulanır (konu kopyalanmaz).
+
+## Hikâyede elle devam
+
+Son bölümün sayfasındaki **Bölüme devam et** kutusundan A, B ya da kendi yazdığın devam seçilir; istersen yeni bölümün seçenekleri de yazılır. Sonraki bölüm hemen yazılıp üretilir.
+
 ## Etkileşimli hikâye dizisi modu
 
 Ayarlar → Format → **Etkileşimli hikâye dizisi**. Bu modda:

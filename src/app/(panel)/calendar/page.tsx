@@ -5,7 +5,7 @@ import { currentChannel } from "@/lib/current-channel";
 import { calendarJob } from "@/lib/pipeline";
 import { formatLocal, toLocalInput } from "@/lib/time";
 import { approveAll, deleteItem, saveItem, setStatus, startCalendar } from "@/app/actions";
-import { STATUS_TR } from "@/app/status";
+import { STATUS_TR, cleanTitle, friendlyError } from "@/app/status";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +27,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
         <div className="card">
           <b>Hikâye dizisi modu:</b> bölümler önceden değil, bir önceki bölümün yorum oylarına göre tek tek yazılır.
           Otomatik üretim açıksa sıradaki bölüm yayın saatinden {s.produceHoursAhead} saat önce yazılıp üretilir; hemen bir bölüm
-          için Panel&apos;deki <Link href="/">Yeni bölüm üret</Link> butonunu kullanın.
+          için Panel&apos;deki <Link href="/">Yeni bölüm üret</Link> butonunu, devamını kendin seçmek için son bölümün sayfasındaki <b>Bölüme devam et</b> kutusunu kullanın.
         </div>
       ) : (
       <div className="card">
@@ -69,12 +69,13 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
           <details key={it.id} className="card">
             <summary className="row">
               <span className={`badge ${it.status}`}>{STATUS_TR[it.status] ?? it.status}</span>
-              <b>{it.title}</b>
+              <b>{cleanTitle(it.title, it.status)}</b>
               <span className="muted">
-                · {it.episodeNumber != null ? `Bölüm ${it.episodeNumber}` : `Gün ${it.dayIndex}`} · {formatLocal(it.publishAt, s.timezone)}
+                · {it.episodeNumber != null ? `Bölüm ${it.episodeNumber} · ` : it.dayIndex > 0 ? `Gün ${it.dayIndex} · ` : ""}{formatLocal(it.publishAt, s.timezone)}
                 {it.votesA != null && ` · Oylar A ${it.votesA} / B ${it.votesB}`}
               </span>
             </summary>
+            {it.error && <p className="err">{friendlyError(it.error)}</p>}
             <form action={saveItem} style={{ marginTop: 10 }}>
               <input type="hidden" name="id" value={it.id} />
               <div className="two">
