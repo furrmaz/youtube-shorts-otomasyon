@@ -1,0 +1,14 @@
+# Alan adı için otomatik ücretsiz HTTPS sertifikası (Let's Encrypt)
+{$DOMAIN} {
+	encode gzip
+	# Demo videosu ve örnek video yüklemeleri büyük olabilir
+	request_body {
+		max_size 2GB
+	}
+	reverse_proxy app:3000 {
+		transport http {
+			read_timeout 30m
+			write_timeout 30m
+		}
+	}
+}

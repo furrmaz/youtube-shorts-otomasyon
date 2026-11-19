@@ -18,6 +18,7 @@ import { uploadTiktok } from "./tiktok";
 import { uploadReel } from "./instagram";
 import { channelSettings, listChannels, type ChannelSettings } from "./channels";
 import { addDaysYmd, parsePublishTimes, ymdInTz, zonedToUtc } from "./time";
+import { avoidLines, channelCorpus, describeMatch, findDuplicate, overusedOpeners, seedOf } from "./originality";
 
 /** API hatalarını anlaşılır Türkçe mesaja çevirir */
 function explain(e: unknown): string {
@@ -86,17 +87,28 @@ export async function generateCalendar(channelId: string, days = 30) {
     const research = (await researchNiche(researchFor)) + (await performanceNotes(channelId));
     await log(`[${s.channel.name}] Araştırma tamamlandı`);
 
-    const previous = await prisma.contentItem.findMany({ where: { channelId }, select: { topic: true }, orderBy: { publishAt: "desc" }, take: 100 });
-    const avoid = previous.map((p) => p.topic);
+    // Özgünlük: kanalın önceki videoları + bu takvimde yazılanlar ile karşılaştırılır
+    const corpus = await channelCorpus(channelId);
+    const avoid = avoidLines(corpus);
     let made = 0;
+    let skipped = 0;
+    let rounds = 0;
     const CHUNK = 6;
-    while (made < total) {
+    while (made < total && rounds++ < Math.ceil(total / CHUNK) + 4) {
       const n = Math.min(CHUNK, total - made);
       job.message = `Senaryolar yazılıyor (${made}/${total})`;
+      const overused = overusedOpeners(corpus);
       const items = promo
-        ? await generatePromoChunk({ ...s, ...s.channel }, research, n, avoid)
-        : await generateCalendarChunk(s, research, n, avoid);
+        ? await generatePromoChunk({ ...s, ...s.channel }, research, n, avoid, overused)
+        : await generateCalendarChunk(s, research, n, avoid, overused);
       for (const it of items) {
+        const dup = findDuplicate(it, corpus);
+        if (dup) {
+          skipped++;
+          await log(`[${s.channel.name}] Tekrar içerik atlandı: "${it.title}" — ${describeMatch(dup)}`, { level: "warn" });
+          avoid.unshift(`${it.title} (çok benzer bulundu, bu açıdan uzak dur)`);
+          continue;
+        }
         const k = made++;
         const day = Math.floor(k / s.videosPerDay);
         const slot = k % s.videosPerDay;
@@ -108,11 +120,12 @@ export async function generateCalendar(channelId: string, days = 30) {
             ...itemFields(it),
           },
         });
-        avoid.push(it.topic);
+        avoid.unshift(avoidLines([it])[0]);
+        corpus.unshift(it);
       }
       if (!items.length) break;
     }
-    job.message = `Tamamlandı: ${made} video planlandı`;
+    job.message = `Tamamlandı: ${made} video planlandı${skipped ? ` (${skipped} benzer metin elendi)` : ""}`;
     await log(`[${s.channel.name}] ${job.message}`);
   } catch (e) {
     job.error = explain(e);
@@ -250,6 +263,7 @@ async function produceStandard(item: ContentItem, s: ChannelSettings, progress: 
     motion: s.styleGuide?.motion ?? (isStory ? "slow" : "normal"),
     transition: s.styleGuide?.transition ?? (isStory ? "fade" : "varied"),
     endCardSeconds: isStory && item.choiceA ? 5 : isPromo ? 3 : 0,
+    variant: seedOf(id),
     musicVolume: s.musicVolume,
     musicPath: await musicFor(s, isStory, duration, (m, warn) => log(m, { itemId: id, level: warn ? "warn" : "info" })),
     fx: { particles: s.particles, progressBar: s.progressBar, sfx: s.sfx, vignette: true },
@@ -460,6 +474,23 @@ export async function publishItem(id: string, opts: { force?: boolean } = {}) {
 
   try {
     if (!item.videoPath) throw new Error("Video dosyası yok");
+    // Otomatik yüklemeden önce son kontrol: yayınlanmış bir videoyla neredeyse aynıysa beklet.
+    // Elle "Yükle" denince (force) kontrol atlanır.
+    if (!opts.force && !plog.youtube?.ok && !plog.tiktok?.ok && !plog.instagram?.ok) {
+      const published = await prisma.contentItem.findMany({
+        where: { channelId: item.channelId, id: { not: id }, OR: [{ status: "UPLOADED" }, { youtubeVideoId: { not: null } }] },
+        select: { id: true, title: true, hook: true, script: true },
+        orderBy: { publishAt: "desc" },
+        take: 300,
+      });
+      const dup = findDuplicate(item, published);
+      if (dup) {
+        const msg = `Otomatik yükleme durduruldu: ${describeMatch(dup)}. YouTube tekrarlayan içerikleri cezalandırabilir. Metni değiştirip yeniden üretin ya da yine de yüklemek için "YouTube'a yükle"ye basın.`;
+        if (item.error !== msg) await log(msg, { itemId: id, level: "warn" });
+        await prisma.contentItem.update({ where: { id }, data: { status: "READY", error: msg } });
+        return;
+      }
+    }
     const targets = [
       { p: "youtube" as const, on: ch.toYoutube, done: !!item.youtubeVideoId, when: true },
       { p: "tiktok" as const, on: ch.toTiktok, done: !!item.tiktokId, when: due },
@@ -648,19 +679,28 @@ async function runQuickVideo(id: string, channelId: string, topicHint: string, p
     if (promo && !s.channel.productName.trim()) throw new Error("Kanal ayarlarından ürün adını girin");
     if (!promo && !s.niche.trim() && !topicHint) throw new Error("Kanal ayarlarından niş girin veya bir konu yazın");
     await log(`Yeni video: metin yazılıyor${topicHint ? ` ("${topicHint}")` : ""}`, { itemId: id });
-    const previous = await prisma.contentItem.findMany({
-      where: { channelId, id: { not: id } }, select: { topic: true }, orderBy: { createdAt: "desc" }, take: 60,
-    });
+    const corpus = (await channelCorpus(channelId)).filter((c) => c.id !== id);
     const brief = topicHint
       ? `Bu videonun konusu/açısı kullanıcı tarafından belirlendi: "${topicHint}". Bunu işle.`
       : promo
         ? ""
         : "Ayrı bir araştırma raporu yok; nişte ilgi çekici, doğruluğundan emin olduğun bir konu seç.";
     const notes = await performanceNotes(channelId);
-    const [it] = promo
-      ? await generatePromoChunk({ ...s, ...s.channel }, brief + notes, 1, previous.map((p) => p.topic))
-      : await generateCalendarChunk(s, brief + notes, 1, previous.map((p) => p.topic));
+    const avoid = avoidLines(corpus, 60);
+    const write = () =>
+      promo
+        ? generatePromoChunk({ ...s, ...s.channel }, brief + notes, 1, avoid, overusedOpeners(corpus))
+        : generateCalendarChunk(s, brief + notes, 1, avoid, overusedOpeners(corpus));
+    let [it] = await write();
     if (!it) throw new Error("Claude metin döndürmedi");
+    // Önceki bir videoya çok benziyorsa bir kez daha, farklı açıdan yazdır
+    const dup = findDuplicate(it, corpus);
+    if (dup) {
+      await log(`Metin önceki bir videoya çok benziyor, yeniden yazılıyor: ${describeMatch(dup)}`, { itemId: id, level: "warn" });
+      avoid.unshift(`${it.title} (çok benzer bulundu, tamamen farklı bir konu/açı seç)`);
+      const [again] = await write();
+      if (again) it = again;
+    }
     await prisma.contentItem.update({ where: { id }, data: { ...itemFields(it), status: "APPROVED" } });
     await log(`Metin hazır: ${it.title}`, { itemId: id });
     await produceItem(id);

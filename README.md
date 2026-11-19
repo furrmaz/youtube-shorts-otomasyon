@@ -54,6 +54,20 @@ Sonraki açılışlarda proje klasöründeki **Baslat.bat** dosyasına çift tı
 
 Yeni sürüm çıktığında panelin üstünde mavi bir uyarı görünür. Uygulamayı kapatıp **Guncelle.bat** dosyasına çift tıklayın (veya `npm run guncelle`), bitince Baslat.bat ile açın.
 
+## Sunucuda 7/24 çalıştırma
+
+Bilgisayarınızı açık tutmak istemiyorsanız panel bir Hetzner sunucusunda (aylık ~4-5 €) Docker ile sürekli çalışabilir: otomatik HTTPS, yeniden başlatmada kendiliğinden açılma, gece veritabanı yedeği ve `/api/health` sağlık kontrolü dahil. Tek betikle kurulum adımları: **[SUNUCU.md](SUNUCU.md)**.
+
+## Tekrarlanan içerik koruması
+
+YouTube, birbirinin neredeyse aynısı olan ya da şablonla seri üretilmiş videoları "tekrarlayan / yeniden kullanılan içerik" sayıp kanalın gelir ortaklığını kapatabilir. Panel bunu önlemek için:
+
+- **Yazarken:** Claude'a kanalın önceki başlıkları ve kanca açılışları verilir; kanca, başlık kalıbı ve kapanış cümlesini çeşitlendirmesi istenir. Son videolarda çok kullanılan açılışlar ayrıca yasaklanır.
+- **Benzerlik denetimi:** Yeni her metin kanaldaki önceki videolarla (metin, başlık, kanca) karşılaştırılır. Takvimde çok benzer çıkan senaryo elenir ve yerine yenisi yazılır; tek videoda bir kez yeniden yazdırılır. Denetim yereldir, ek API maliyeti yoktur.
+- **Yüklemeden önce:** Hazır video yayınlanmış bir videoya çok benziyorsa otomatik yükleme durur ve video sayfasında uyarı çıkar. Yine de yüklemek için "YouTube'a yükle"ye basmanız yeterli.
+- **Video sayfasında "Özgünlük"** satırı en benzer videoyu ve oranı gösterir.
+- **Görsel çeşitlilik:** Her videonun kamera hareketleri, geçiş sırası ve parçacık dizilimi videoya özel olarak değişir; aynı kurgu şablonu tekrar etmez.
+
 ## Video kalitesi özellikleri
 
 - **2.5D hareket:** "Claude çizimi" seçiliyken her sahne arka plan, özne ve ön plan katmanlarıyla çizilir; kamera hareket ederken katmanlar farklı hızlarda kayar ve derinlik hissi oluşur.
@@ -135,6 +149,8 @@ src/lib/images.ts    Görsel sağlayıcıları: claude (SVG çizim), fal, replic
 src/lib/video.ts     Sahne zamanlama, Ken Burns klipleri, geçişler, ASS altyazı, montaj
 src/lib/youtube.ts   OAuth ve yükleme
 src/lib/pipeline.ts  Takvim üretimi, üretim, yükleme, zamanlayıcı turu
+src/lib/originality.ts  Tekrarlanan içerik denetimi (benzerlik, çeşitlilik kuralları)
+Dockerfile, docker-compose.yml, deploy/  Sunucu kurulumu (SUNUCU.md)
 scripts/worker.ts    Sürekli çalışan zamanlayıcı
 src/app/             Panel sayfaları (Next.js App Router)
 ```

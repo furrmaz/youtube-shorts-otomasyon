@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.env
+*.db
+*.db-journal
+media
+music/*
+!music/.gitkeep
+data

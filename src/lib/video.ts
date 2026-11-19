@@ -34,7 +34,7 @@ function zoompanFor(i: number, frames: number, motion: Motion, k = 1) {
   const z = (motion === "slow" ? 0.08 : 0.16) * k;
   const p = 1 + (motion === "slow" ? 0.07 : 0.14) * k;
   let e: string;
-  switch (i % 4) {
+  switch (i % 6) {
     case 0: // yakınlaş
       e = `z='1+${z.toFixed(4)}*on/${F}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'`;
       break;
@@ -44,8 +44,14 @@ function zoompanFor(i: number, frames: number, motion: Motion, k = 1) {
     case 2: // sağa kaydır
       e = `z='${p.toFixed(4)}':x='(iw-iw/zoom)*on/${F}':y='ih/2-(ih/zoom/2)'`;
       break;
-    default: // yukarı kaydır
+    case 3: // yukarı kaydır
       e = `z='${p.toFixed(4)}':x='iw/2-(iw/zoom/2)':y='(ih-ih/zoom)*(1-on/${F})'`;
+      break;
+    case 4: // sola kaydır
+      e = `z='${p.toFixed(4)}':x='(iw-iw/zoom)*(1-on/${F})':y='ih/2-(ih/zoom/2)'`;
+      break;
+    default: // aşağı kaydır
+      e = `z='${p.toFixed(4)}':x='iw/2-(iw/zoom/2)':y='(ih-ih/zoom)*on/${F}'`;
   }
   return `zoompan=${e}:d=${F}:s=${W}x${H}:fps=${FPS}`;
 }
@@ -317,8 +323,11 @@ export async function renderVideo(opts: {
   fx?: RenderFx;
   brand?: Brand;
   onProgress?: (msg: string) => Promise<void> | void;
+  /** Videoya özel kurgu tohumu: kamera hareketi, geçiş sırası ve parçacıklar her videoda farklı dizilir */
+  variant?: number;
 }) {
   const { dir, scenes, audioPath, words, outPath } = opts;
+  const v = opts.variant ?? 0;
   const fx = opts.fx ?? {};
   const motion = opts.motion ?? "normal";
   const xf = opts.transition === "fade" ? 0.3 : XFADE;
@@ -335,7 +344,7 @@ export async function renderVideo(opts: {
     const dur = Math.max(1.2, s.end - s.start + (isLast ? endSec : xf));
     const frames = Math.ceil(dur * FPS);
     const clip = path.join(dir, `clip_${String(i).padStart(2, "0")}.mp4`);
-    await sceneClip(i, s.image, frames, motion, clip);
+    await sceneClip(i + v, s.image, frames, motion, clip);
     clips.push(clip);
     durations.push(frames / FPS);
   }
@@ -359,7 +368,7 @@ export async function renderVideo(opts: {
     offset += durations[i - 1] - xf;
     cuts.push(offset);
     const out = `[x${i}]`;
-    const tr = opts.transition === "fade" ? "fade" : TRANSITIONS[(i - 1) % TRANSITIONS.length];
+    const tr = opts.transition === "fade" ? "fade" : TRANSITIONS[(i - 1 + v) % TRANSITIONS.length];
     filters.push(`${prev}[${i}:v]xfade=transition=${tr}:duration=${xf}:offset=${offset.toFixed(3)}${out}`);
     prev = out;
   }
@@ -380,7 +389,7 @@ export async function renderVideo(opts: {
   }
   if (fx.particles) {
     const dust = path.join(dir, "particles.png");
-    await makeParticles(dust, scenes.length * 7919 + Math.round(total));
+    await makeParticles(dust, (v % 100000) + scenes.length * 7919 + Math.round(total));
     filters.push(`${still(dust)}[dust]`, `${prev}[dust]overlay=x=0:y='-mod(t*24,${H})':format=yuv420:shortest=1[pt]`);
     prev = "[pt]";
   }
