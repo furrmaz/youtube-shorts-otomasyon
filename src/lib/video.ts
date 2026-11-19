@@ -8,6 +8,14 @@ export type Scene = { text: string; imagePrompt: string; start: number; end: num
 const W = 1080;
 const H = 1920;
 const FPS = 30;
+/**
+ * Son çıktı kodlaması. YouTube her videoyu yeniden sıkıştırdığı için yüksek bit hızlı yükleme
+ * daha net sonuç verir (CRF 16, High profil, 1 sn'lik kapalı GOP; YouTube önerisi).
+ */
+const FINAL_VIDEO = [
+  "-c:v", "libx264", "-preset", "medium", "-crf", "16", "-profile:v", "high", "-pix_fmt", "yuv420p",
+  "-g", "30", "-bf", "2", "-maxrate", "16M", "-bufsize", "24M",
+];
 const XFADE = 0.4; // geçiş süresi (sn)
 const TRANSITIONS = ["fade", "smoothleft", "smoothup", "circleopen", "slideleft", "fadeblack", "smoothright", "radial"];
 
@@ -282,9 +290,10 @@ export type RenderFx = {
 async function sceneClip(i: number, image: string, frames: number, motion: Motion, out: string) {
   const layer = (l: string) => image.replace(/\.png$/, `_${l}.png`);
   const layered = await Promise.all(["bg", "mid", "fg"].map((l) => fs.access(layer(l)).then(() => true, () => false)));
-  const enc = ["-frames:v", String(frames), "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-an", out];
+  // Ara klip neredeyse kayıpsız: son montajda yeniden sıkıştırılacağı için iki kez kalite kaybı olmasın
+  const enc = ["-frames:v", String(frames), "-c:v", "libx264", "-preset", "fast", "-crf", "12", "-pix_fmt", "yuv420p", "-an", out];
   if (layered.every(Boolean)) {
-    const fit = `scale=${W * 2}:${H * 2}:force_original_aspect_ratio=increase,crop=${W * 2}:${H * 2}`;
+    const fit = `scale=${W * 2}:${H * 2}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W * 2}:${H * 2}`;
     // zoompan alfa kanalını korumadığı için renk ve alfa ayrı hareket ettirilip birleştirilir.
     // yuv420p/gray üzerinde çalışmak rgb'ye göre ~3 kat hızlı.
     const moving = (inp: string, k: number, n: string) =>
@@ -304,7 +313,7 @@ async function sceneClip(i: number, image: string, frames: number, motion: Motio
   } else {
     await ffmpeg([
       "-loop", "1", "-i", image,
-      "-vf", `scale=${W * 2}:${H * 2}:force_original_aspect_ratio=increase,crop=${W * 2}:${H * 2},format=yuv420p,${zoompanFor(i, frames, motion)},format=yuv420p`,
+      "-vf", `scale=${W * 2}:${H * 2}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W * 2}:${H * 2},format=yuv420p,${zoompanFor(i, frames, motion)},format=yuv420p`,
       ...enc,
     ]);
   }
@@ -442,7 +451,7 @@ export async function renderVideo(opts: {
     "-filter_complex", filters.join(";"),
     "-map", "[v]", "-map", "[a]",
     "-t", total.toFixed(3),
-    "-c:v", "libx264", "-preset", "medium", "-crf", "19", "-pix_fmt", "yuv420p", "-r", String(FPS),
+    ...FINAL_VIDEO, "-r", String(FPS),
     "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
     outPath,
   ]);
@@ -587,7 +596,7 @@ export async function renderClip(opts: {
     "-filter_complex", filters.join(";"),
     "-map", "[v]", "-map", "[a]",
     "-t", total.toFixed(3),
-    "-c:v", "libx264", "-preset", "medium", "-crf", "19", "-pix_fmt", "yuv420p", "-r", String(FPS),
+    ...FINAL_VIDEO, "-r", String(FPS),
     "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
     outPath,
   ]);

@@ -32,7 +32,7 @@ async function elevenLabs(text: string, voiceId: string, outPath: string): Promi
   if (!key) throw new Error("ElevenLabs API anahtarı girilmemiş (Ayarlar → API anahtarları)");
   if (!voiceId) throw new Error("Ayarlarda ElevenLabs sesi seçilmemiş");
   if (voiceId.startsWith("sk_")) throw new Error("Ses alanına API anahtarı girilmiş; Ayarlar'dan listeden bir ses seçin");
-  const res = await fetch(
+  const r = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=mp3_44100_128`,
     {
       method: "POST",
@@ -44,8 +44,15 @@ async function elevenLabs(text: string, voiceId: string, outPath: string): Promi
       }),
     },
   );
-  if (!res.ok) throw new Error(`ElevenLabs hatası ${res.status}: ${(await res.text()).slice(0, 500)}`);
-  const data = (await res.json()) as {
+  if (!r.ok) {
+    const body = (await r.text()).slice(0, 500);
+    const hint =
+      r.status === 401 ? " (API anahtarı geçersiz ya da anahtarda 'Text to Speech' izni kapalı)" :
+      r.status === 402 || /quota|credits/i.test(body) ? " (ElevenLabs kredisi bitmiş)" :
+      r.status === 404 ? " (seçili ses bu hesapta yok; Kanal ayarlarından sesi yeniden seçin)" : "";
+    throw new Error(`ElevenLabs hatası ${r.status}${hint}: ${body}`);
+  }
+  const data = (await r.json()) as {
     audio_base64: string;
     alignment: { characters: string[]; character_start_times_seconds: number[]; character_end_times_seconds: number[] };
   };
@@ -66,8 +73,29 @@ async function mock(text: string, outPath: string): Promise<TtsResult> {
   return { audioPath: outPath, words, duration };
 }
 
+/**
+ * Kullanılacak seslendirme sağlayıcısı. ElevenLabs anahtarı girilmişse "Deneme" seçili kalmış olsa bile
+ * gerçek seslendirme yapılır (eski kurulumlarda varsayılan "Deneme" idi ve anahtar girildiği halde
+ * videolar sessiz çıkıyordu).
+ */
+export async function effectiveTts(provider: string): Promise<"elevenlabs" | "mock"> {
+  if (provider === "elevenlabs") return "elevenlabs";
+  return (await cfg()).elevenApiKey ? "elevenlabs" : "mock";
+}
+
+/** Kanalda ses seçilmemişse hesaptaki ilk ses kullanılır */
+async function resolveVoice(voiceId: string): Promise<string> {
+  if (voiceId && !voiceId.startsWith("sk_")) return voiceId;
+  const c = await cfg();
+  const voices = await listVoices(c.elevenApiKey);
+  if (!voices.length) throw new Error("ElevenLabs hesabında hiç ses yok; Kanal ayarlarından bir ses seçin");
+  return voices[0].voice_id;
+}
+
 export async function synthesize(provider: string, text: string, voiceId: string, outPath: string) {
-  return provider === "elevenlabs" ? elevenLabs(text, voiceId, outPath) : mock(text, outPath);
+  const p = await effectiveTts(provider);
+  if (p === "mock") return { ...(await mock(text, outPath)), provider: p };
+  return { ...(await elevenLabs(text, await resolveVoice(voiceId), outPath)), provider: p };
 }
 
 export type Voice = { voice_id: string; name: string; labels?: Record<string, string> };

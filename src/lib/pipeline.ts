@@ -8,7 +8,7 @@ import {
   planScenes, researchNiche, generateCalendarChunk, createSeriesBible, writeEpisode,
   generatePromoChunk, writeSalesVideo, planDemoClip, type CalendarItemT,
 } from "./claude";
-import { synthesize, transcribe, type Word } from "./tts";
+import { effectiveTts, synthesize, transcribe, type Word } from "./tts";
 import { generateImage } from "./images";
 import { renderVideo, renderClip, timeScenes, probe, sampleFrames, type Scene, type Overlays } from "./video";
 import { musicFor } from "./music";
@@ -173,13 +173,19 @@ type Progress = (m: string | null) => Promise<void>;
 async function voiceFor(item: ContentItem, s: ChannelSettings, dir: string, text: string) {
   const audioPath = path.join(dir, "voice.mp3");
   const wordsPath = path.join(dir, "words.json");
+  const want = await effectiveTts(s.ttsProvider);
   if ((await exists(audioPath)) && (await exists(wordsPath))) {
-    const { words, duration } = JSON.parse(await fs.readFile(wordsPath, "utf8")) as { words: Word[]; duration: number };
-    return { audioPath, words, duration };
+    const cached = JSON.parse(await fs.readFile(wordsPath, "utf8")) as { words: Word[]; duration: number; provider?: string; text?: string };
+    // Önceden "Deneme" ile üretilmiş sessiz ses ya da değişmiş metin yeniden seslendirilir
+    const sameProvider = (cached.provider ?? "mock") === want || want === "mock";
+    if (sameProvider && (cached.text === undefined || cached.text === text)) {
+      return { audioPath, words: cached.words, duration: cached.duration };
+    }
   }
+  if (s.ttsProvider !== want) await log(`ElevenLabs anahtarı bulundu, "Deneme" yerine ElevenLabs ile seslendiriliyor`, { itemId: item.id });
   const tts = await synthesize(s.ttsProvider, text, s.elevenVoiceId, audioPath);
-  await fs.writeFile(wordsPath, JSON.stringify({ words: tts.words, duration: tts.duration }));
-  await log(`Seslendirme hazır (${tts.duration.toFixed(1)} sn, ${s.ttsProvider})`, { itemId: item.id });
+  await fs.writeFile(wordsPath, JSON.stringify({ words: tts.words, duration: tts.duration, provider: tts.provider, text }));
+  await log(`Seslendirme hazır (${tts.duration.toFixed(1)} sn, ${tts.provider})`, { itemId: item.id });
   return { audioPath, words: tts.words, duration: tts.duration };
 }
 
@@ -376,7 +382,7 @@ export async function createClip(opts: {
       const info = await probe(opts.sourcePath);
       if (!info.duration) throw new Error("Video okunamadı");
       let transcript: Word[] = [];
-      if (info.hasAudio && s.ttsProvider === "elevenlabs") {
+      if (info.hasAudio && (await effectiveTts(s.ttsProvider)) === "elevenlabs") {
         try {
           const a = path.join(dir, "source_audio.mp3");
           const { ffmpeg } = await import("./ffmpeg");
