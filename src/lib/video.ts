@@ -57,7 +57,10 @@ function zoompanFor(i: number, frames: number, motion: Motion, k = 1) {
 }
 
 // Shorts için yaygın ses seviyesi (~-14 LUFS); ElevenLabs çıktısı -23 civarında kalıyordu
-const LOUD = "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000";
+// Her ses girdisi karıştırılmadan önce aynı biçime (48 kHz, stereo) getirilir. Mono MP3 anlatım ile
+// kanal düzeni belirsiz WAV efektin karışması Debian ffmpeg 5.1 sürümünde "Cannot select channel layout" hatası veriyordu.
+const AF = "aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo";
+const LOUD = `loudnorm=I=-14:TP=-1.5:LRA=11,${AF}`;
 
 function assTime(t: number) {
   const cs = Math.max(0, Math.round(t * 100));
@@ -214,7 +217,7 @@ async function makeWhoosh(outPath: string) {
   await ffmpeg([
     "-f", "lavfi", "-i", "anoisesrc=d=0.7:c=pink:a=0.6:r=48000",
     "-af", "highpass=f=250,lowpass=f=2800,afade=t=in:d=0.3:curve=exp,afade=t=out:st=0.3:d=0.4,volume=0.9",
-    "-ac", "2", outPath,
+    "-ac", "2", "-c:a", "flac", outPath,
   ]);
 }
 
@@ -404,22 +407,22 @@ export async function renderVideo(opts: {
     const mi = add("-stream_loop", "-1", "-i", music);
     // Müzik konuşma sırasında otomatik kısılır (ducking), aralarda hafifçe yükselir
     filters.push(
-      `[${ai}:a]apad,asplit=2[voice][vsc]`,
-      `[${mi}:a]aresample=48000,volume=${opts.musicVolume}[bgm]`,
+      `[${ai}:a]${AF},apad,asplit=2[voice][vsc]`,
+      `[${mi}:a]${AF},volume=${opts.musicVolume}[bgm]`,
       `[bgm][vsc]sidechaincompress=threshold=0.04:ratio=5:attack=20:release=400[bgd]`,
     );
     mix.push("[voice]", "[bgd]");
   } else {
-    filters.push(`[${ai}:a]apad[voice]`);
+    filters.push(`[${ai}:a]${AF},apad[voice]`);
     mix.push("[voice]");
   }
   if (fx.sfx && cuts.length) {
-    const wh = path.join(dir, "whoosh.wav");
+    const wh = path.join(dir, "whoosh.flac");
     await makeWhoosh(wh);
     const wi = add("-i", wh);
     const n = cuts.length;
     const outs = cuts.map((_, j) => `[w${j}]`);
-    filters.push(`[${wi}:a]volume=0.32,asplit=${n}${outs.join("")}`);
+    filters.push(`[${wi}:a]${AF},volume=0.32,asplit=${n}${outs.join("")}`);
     cuts.forEach((c, j) => {
       const ms = Math.max(0, Math.round((c + xf / 2 - 0.35) * 1000));
       filters.push(`[w${j}]adelay=${ms}|${ms}[wd${j}]`);
@@ -553,18 +556,18 @@ export async function renderClip(opts: {
   const mix: string[] = [];
   if (opts.voicePath) {
     const vi = add("-i", opts.voicePath);
-    filters.push(`[${vi}:a]aresample=48000,apad,asplit=2[voice][vsc]`);
+    filters.push(`[${vi}:a]${AF},apad,asplit=2[voice][vsc]`);
     mix.push("[voice]");
   }
   if (info.hasAudio && (opts.keepSourceAudio || opts.voicePath)) {
     const vol = opts.voicePath ? 0.12 : 1;
-    filters.push(`[0:a]aresample=48000,volume=${vol},apad[src]`);
+    filters.push(`[0:a]${AF},volume=${vol},apad[src]`);
     mix.push("[src]");
   }
   const music = opts.musicPath && opts.musicVolume ? opts.musicPath : null;
   if (music) {
     const mi = add("-stream_loop", "-1", "-i", music);
-    filters.push(`[${mi}:a]aresample=48000,volume=${opts.musicVolume}[bgm]`);
+    filters.push(`[${mi}:a]${AF},volume=${opts.musicVolume}[bgm]`);
     if (opts.voicePath) {
       filters.push(`[bgm][vsc]sidechaincompress=threshold=0.04:ratio=5:attack=20:release=400[bgd]`);
       mix.push("[bgd]");
