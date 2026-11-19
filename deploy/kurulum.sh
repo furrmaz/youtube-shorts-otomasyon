@@ -23,7 +23,10 @@ fi
 systemctl enable --now docker
 
 echo "=== 2/6 Güvenlik duvarı: sadece SSH, HTTP, HTTPS açık ==="
-ufw allow OpenSSH >/dev/null
+# SSH bazı sağlayıcılarda 22 dışında bir portta çalışır (ör. 25416); bağlantı kesilmesin diye gerçek port açılır
+SSH_PORTS="$( (sshd -T 2>/dev/null || true) | awk '/^port /{print $2}' | sort -u)"
+for P in 22 $SSH_PORTS; do ufw allow "$P/tcp" >/dev/null; done
+echo "SSH portları açık: 22 $SSH_PORTS"
 ufw allow 80/tcp >/dev/null
 ufw allow 443/tcp >/dev/null
 ufw allow 443/udp >/dev/null
