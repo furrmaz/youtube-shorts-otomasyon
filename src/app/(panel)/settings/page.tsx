@@ -45,7 +45,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <div className="two">
           <div>
             <label>Seslendirme</label>
-            <select name="ttsProvider" defaultValue={s.ttsProvider}>
+            <select name="ttsProvider" defaultValue={c.elevenApiKey ? "elevenlabs" : s.ttsProvider}>
               <option value="elevenlabs">ElevenLabs</option>
               <option value="mock">Deneme (sessiz, anahtar gerekmez)</option>
             </select>

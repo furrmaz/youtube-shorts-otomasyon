@@ -1,3 +1,4 @@
+import { AutoRefresh } from "@/app/components/AutoRefresh";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { channelSettings } from "@/lib/channels";
@@ -52,8 +53,8 @@ export default async function Dashboard() {
   const k = await cfg();
   const setup = [
     { ok: !!k.anthropicApiKey, label: "Claude API anahtarı", href: "/settings#anahtarlar" },
-    { ok: s.ttsProvider === "elevenlabs" && !!k.elevenApiKey, label: "ElevenLabs anahtarı ve seslendirme \"ElevenLabs\"", href: "/settings#anahtarlar" },
-    { ok: s.ttsProvider !== "elevenlabs" || !!ch.elevenVoiceId, label: "Bu kanal için ses seçimi", href: `/channels/${cid}` },
+    { ok: !!k.elevenApiKey, label: "ElevenLabs anahtarı (seslendirme)", href: "/settings#anahtarlar" },
+    { ok: !k.elevenApiKey || !!ch.elevenVoiceId, label: "Bu kanal için ses seçimi", href: `/channels/${cid}` },
     { ok: s.imageProvider !== "mock", label: "Görsel sağlayıcı (Claude çizimi önerilir)", href: "/settings" },
     {
       ok: ch.contentFormat === "promo" ? !!(ch.productName && ch.productProblem) : ch.contentFormat === "story" ? true : !!ch.niche,
@@ -72,7 +73,7 @@ export default async function Dashboard() {
   return (
     <>
       <h1>Panel · {ch.name}</h1>
-      {upcoming.some((u) => ["WRITING", "PRODUCING", "UPLOADING"].includes(u.status)) && <meta httpEquiv="refresh" content="15" />}
+      {upcoming.some((u) => ["WRITING", "PRODUCING", "UPLOADING"].includes(u.status)) && <AutoRefresh seconds={15} />}
       {missing.length > 0 && (
         <div className="card">
           <b>Kurulum: {setup.length - missing.length}/{setup.length} tamam</b>
@@ -125,7 +126,7 @@ export default async function Dashboard() {
 
       <div className="card">
         <div className="muted" style={{ marginBottom: 8 }}>
-          {s.contentFormat === "promo" ? "Ürün" : "Niş"}: <b>{(s.contentFormat === "promo" ? ch.productName : s.niche) || "— (kanal ayarlarından girin)"}</b> · Günde {s.videosPerDay} video · Saatler {s.publishTimes} · Ses: {s.ttsProvider} · Görsel: {s.imageProvider} · Otomatik: {s.autoProduce ? "açık" : "kapalı"}
+          {s.contentFormat === "promo" ? "Ürün" : "Niş"}: <b>{(s.contentFormat === "promo" ? ch.productName : s.niche) || "— (kanal ayarlarından girin)"}</b> · Günde {s.videosPerDay} video · Saatler {s.publishTimes} · Ses: {k.elevenApiKey ? "ElevenLabs" : "yok (sessiz)"} · Görsel: {s.imageProvider} · Otomatik: {s.autoProduce ? "açık" : "kapalı"}
         </div>
         <div className="grid">
           {["DRAFT", "APPROVED", "PRODUCING", "READY", "UPLOADED", "FAILED"].map((k) => (

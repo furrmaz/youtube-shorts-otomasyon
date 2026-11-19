@@ -1,3 +1,4 @@
+import { AutoRefresh } from "@/app/components/AutoRefresh";
 import Link from "next/link";
 import path from "node:path";
 import { notFound } from "next/navigation";
@@ -66,7 +67,7 @@ export default async function ItemPage({ params, searchParams }: { params: Promi
         {it.views != null && (
           <span className="muted">👁 {it.views.toLocaleString("tr-TR")} izlenme · 👍 {it.likes ?? 0} · 💬 {it.comments ?? 0}</span>
         )}
-        {busy && <meta httpEquiv="refresh" content="8" />}
+        {busy && <AutoRefresh seconds={8} />}
         {it.status === "READY" && !it.autoUpload && <span className="muted">Otomatik yüklenmeyecek, kontrol edip yükleyin</span>}
         {closest && (
           <span className={closest.score >= 1 ? "err" : "muted"} title="YouTube tekrarlayan içerik politikası için kanaldaki en benzer videoyla karşılaştırma">

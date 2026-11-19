@@ -24,7 +24,8 @@ const fal: ImageProvider = async (prompt, outPath, seed) => {
   const r = await fetch(`https://fal.run/${model}`, {
     method: "POST",
     headers: { Authorization: `Key ${key}`, "content-type": "application/json" },
-    body: JSON.stringify({ prompt, image_size: "portrait_16_9", num_images: 1, seed, enable_safety_checker: true }),
+    // "portrait_16_9" sadece 576x1024 veriyordu; video 2160x3840 üzerinden kadrajlandığı için bulanıklaşıyordu.
+    body: JSON.stringify({ prompt, image_size: { width: 1088, height: 1920 }, num_images: 1, seed, enable_safety_checker: true, output_format: "png" }),
   });
   if (!r.ok) throw new Error(`fal.ai hatası ${r.status}: ${(await r.text()).slice(0, 400)}`);
   const data = (await r.json()) as { images?: { url: string }[] };
@@ -42,7 +43,7 @@ const replicate: ImageProvider = async (prompt, outPath, seed) => {
   let r = await fetch(`https://api.replicate.com/v1/models/${model}/predictions`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ input: { prompt, aspect_ratio: "9:16", output_format: "png", seed } }),
+    body: JSON.stringify({ input: { prompt, aspect_ratio: "9:16", output_format: "png", output_quality: 100, seed } }),
   });
   if (!r.ok) throw new Error(`Replicate hatası ${r.status}: ${(await r.text()).slice(0, 400)}`);
   let pred = (await r.json()) as { status: string; output?: string | string[]; error?: string; urls: { get: string } };
@@ -105,7 +106,8 @@ export async function renderLayers(svg: string, imgPath: string): Promise<boolea
 const claude: ImageProvider = async (prompt, outPath, _seed, ctx) => {
   const svg = await drawSceneSvg(prompt, ctx?.characters || undefined);
   await fs.writeFile(outPath.replace(/\.png$/, ".svg"), svg);
-  await svgToPng(svg, outPath);
+  // 2x çözünürlük: kamera yakınlaştığında çizgiler keskin kalır
+  await svgToPng(svg, outPath, 2160);
   await renderLayers(svg, outPath);
 };
 

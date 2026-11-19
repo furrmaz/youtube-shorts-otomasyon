@@ -1,3 +1,4 @@
+import { AutoRefresh } from "@/app/components/AutoRefresh";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
@@ -16,7 +17,7 @@ export default async function ClipsPage() {
   return (
     <>
       <h1>Demo klipleri · {ch.name}</h1>
-      {busy && <meta httpEquiv="refresh" content="10" />}
+      {busy && <AutoRefresh seconds={10} />}
       <ClipUpload channelId={ch.id} />
       <div className="card">
         {clips.length === 0 ? (

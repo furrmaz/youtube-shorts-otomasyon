@@ -20,11 +20,12 @@ export default async function PanelLayout({ children }: { children: ReactNode })
   const warnings: string[] = [];
   if (!c.anthropicApiKey) warnings.push("Claude API anahtarı girilmemiş: metin yazımı ve çizim çalışmaz.");
   if (s.imageProvider === "mock") warnings.push("Görsel sağlayıcı \"Deneme\" seçili: sahneler çizim değil, renkli degrade olur.");
-  if (s.ttsProvider === "mock") warnings.push("Ses sağlayıcı \"Deneme\" seçili: seslendirme yapılmaz.");
+  if (!c.elevenApiKey) warnings.push("ElevenLabs API anahtarı girilmemiş: videolar sessiz (seslendirmesiz) çıkar.");
   const update = await updateAvailable();
   const links = [
     { href: "/", label: "Panel" },
     { href: "/calendar", label: ch.contentFormat === "story" ? "Bölümler" : "Takvim" },
+    { href: "/media", label: "Medya" },
     { href: "/clips", label: "Demo klipleri" },
     ...(ch.contentFormat === "promo" ? [{ href: "/sales", label: "Satış videoları" }] : []),
     { href: "/style", label: "Örnek video" },

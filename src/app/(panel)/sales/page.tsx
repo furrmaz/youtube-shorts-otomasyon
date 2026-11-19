@@ -1,3 +1,4 @@
+import { AutoRefresh } from "@/app/components/AutoRefresh";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { currentChannel } from "@/lib/current-channel";
@@ -17,7 +18,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
   return (
     <>
       <h1>Satış videoları · {ch.name}</h1>
-      {busy && <meta httpEquiv="refresh" content="12" />}
+      {busy && <AutoRefresh seconds={12} />}
       {started && <div className="card">Üretim başladı. Her sektör için video birkaç dakikada hazır olur; sayfa kendini yeniler.</div>}
       <p className="muted">
         Satış ekibinin müşteriye WhatsApp veya e-postayla gönderebileceği, sektöre özel 25-35 saniyelik videolar. Bunlar otomatik yayınlanmaz;

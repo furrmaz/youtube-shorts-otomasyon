@@ -1,3 +1,4 @@
+import { AutoRefresh } from "@/app/components/AutoRefresh";
 import Link from "next/link";
 import path from "node:path";
 import { currentChannel } from "@/lib/current-channel";
@@ -23,7 +24,7 @@ export default async function StylePage({ searchParams }: { searchParams: Promis
   return (
     <>
       <h1>Örnek video · {ch.name}</h1>
-      {busy && <meta httpEquiv="refresh" content="8" />}
+      {busy && <AutoRefresh seconds={8} />}
       {applied && <div className="card">Tarz bu kanala uygulandı ✓ Bundan sonra üretilen videolar bu örneğe göre yazılır, çizilir ve kurgulanır.</div>}
       <p className="muted">
         Beğendiğin bir Shorts/Reels/TikTok videosunu yükle. Claude videoyu kare kare izler, konuşmasını dinler, kesme sayısını ve konuşma hızını
