@@ -3,6 +3,7 @@ import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import type { AppSettings } from "./settings";
 import { cfg } from "./config";
+import { ORIGINALITY_RULES } from "./originality";
 // Politika reddinde API isteği otomatik olarak uygun bir modelde yeniden çalıştırır.
 const FALLBACK = { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const };
 
@@ -72,6 +73,9 @@ Rapor ${langName(s.language)} dilinde olsun.`,
   throw new Error("Araştırma tamamlanamadı (pause_turn sınırı)");
 }
 
+const overusedBlock = (o: string[]) =>
+  o.length ? `Son videolarda çok kullanılan açılışlar (bunlarla başlama): ${o.map((x) => `"${x}…"`).join(", ")}\n` : "";
+
 const CalendarItem = z.object({
   topic: z.string().describe("Kısa konu başlığı"),
   hook: z.string().describe("İlk 2 saniyede söylenecek, merak uyandıran tek cümle"),
@@ -89,6 +93,7 @@ export async function generateCalendarChunk(
   research: string,
   count: number,
   avoidTopics: string[],
+  overused: string[] = [],
 ): Promise<CalendarItemT[]> {
   const { api, model } = await client();
   const res = await api.beta.messages.parse({
@@ -97,6 +102,7 @@ export async function generateCalendarChunk(
     output_config: { effort: "medium", format: betaZodOutputFormat(CalendarChunk) },
     system: `Sen deneyimli bir YouTube Shorts senaristisin. Bilgilendirici, doğru ve akıcı metinler yazarsın.
 Metinler seslendirileceği için kısa cümleler kullan, emoji, madde işareti ve sahne yönergesi yazma.
+${ORIGINALITY_RULES}
 Tüm çıktı ${langName(s.language)} dilinde olsun.`,
     messages: [
       {
@@ -109,8 +115,8 @@ Araştırma raporu:
 ${research}
 </research>
 
-${avoidTopics.length ? `Daha önce planlanan konular (tekrar etme):\n${avoidTopics.map((t) => "- " + t).join("\n")}\n` : ""}
-Tam olarak ${count} farklı Shorts videosu planla. Her biri:
+${avoidTopics.length ? `Kanalda daha önce yapılan videolar (konuyu, başlığı ve kanca kalıbını tekrar etme):\n${avoidTopics.map((t) => "- " + t).join("\n")}\n` : ""}${overusedBlock(overused)}
+Tam olarak ${count} farklı Shorts videosu planla. Videolar birbirine de benzemesin. Her biri:
 - Kanca ile başlayan, tek bir bilgiyi net anlatan, sonunda kısa bir merak/etkileşim cümlesi olan 110-150 kelimelik metin
 - Sadece doğruluğundan emin olduğun bilgiler${styleBlock(s)}`,
       },
@@ -352,6 +358,7 @@ export async function generatePromoChunk(
   research: string,
   count: number,
   avoidTopics: string[],
+  overused: string[] = [],
 ): Promise<CalendarItemT[]> {
   const { api, model } = await client();
   const res = await api.beta.messages.parse({
@@ -360,6 +367,7 @@ export async function generatePromoChunk(
     output_config: { effort: "medium", format: betaZodOutputFormat(CalendarChunk) },
     system: `Sen B2B yazılım ürünleri için kısa dikey video (Shorts, Reels, TikTok) senaryoları yazan bir pazarlama senaristisin.
 ${PROMO_RULES}
+${ORIGINALITY_RULES}
 Tüm çıktı ${langName(s.language)} dilinde olsun.`,
     messages: [
       {
@@ -368,7 +376,7 @@ Tüm çıktı ${langName(s.language)} dilinde olsun.`,
 Kanal tonu: ${s.channelStyle}
 
 ${research ? `Hedef kitle hakkında araştırma notları:\n<research>\n${research}\n</research>\n` : ""}
-${avoidTopics.length ? `Daha önce kullanılan açılar/konular (tekrar etme):\n${avoidTopics.map((t) => "- " + t).join("\n")}\n` : ""}
+${avoidTopics.length ? `Daha önce kullanılan açılar ve başlıklar (tekrar etme, aynı kanca kalıbıyla başlama):\n${avoidTopics.map((t) => "- " + t).join("\n")}\n` : ""}${overusedBlock(overused)}
 Tam olarak ${count} farklı tanıtım videosu yaz. Her biri farklı bir açıdan olsun; örnek açılar:
 günün kötü bir anı ve çözümü, tek bir özelliğe yakın plan, "bunu hâlâ elle mi yapıyorsun?", önce/sonra, 3 işaret (bu ürüne ihtiyacın olduğunu gösteren), sık yapılan bir hata, bir çalışanın/patronun bakış açısı, sektöre özel bir senaryo.
 topic alanına açıyı kısaca yaz. Açıklamanın sonuna web adresini ve 3-5 hashtag ekle.${styleBlock(s)}`,

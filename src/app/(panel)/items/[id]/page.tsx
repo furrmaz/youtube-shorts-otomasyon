@@ -8,6 +8,7 @@ import type { Scene } from "@/lib/video";
 import { continueStory, produceNow, rewriteEpisode, redrawScene, regenerateMedia, rerenderVideo, setStatus, uploadNow } from "@/app/actions";
 import { STATUS_TR, cleanTitle, friendlyError } from "@/app/status";
 import { exists } from "@/lib/paths";
+import { channelCorpus, compare } from "@/lib/originality";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,13 @@ export default async function ItemPage({ params, searchParams }: { params: Promi
   const nextEp = it.episodeNumber != null
     ? await prisma.contentItem.findFirst({ where: { channelId: it.channelId, episodeNumber: it.episodeNumber + 1 } })
     : null;
+  // Özgünlük: kanaldaki en benzer video (1 = tekrar sınırı)
+  const closest = it.script.trim()
+    ? (await channelCorpus(it.channelId))
+        .filter((o) => o.id !== it.id)
+        .map((o) => compare(it, o))
+        .reduce<ReturnType<typeof compare>>((m, r) => (r && (!m || r.score > m.score) ? r : m), null)
+    : null;
   const v = it.updatedAt.getTime();
   const busy = ["WRITING", "PRODUCING", "UPLOADING"].includes(it.status);
 
@@ -60,6 +68,12 @@ export default async function ItemPage({ params, searchParams }: { params: Promi
         )}
         {busy && <meta httpEquiv="refresh" content="8" />}
         {it.status === "READY" && !it.autoUpload && <span className="muted">Otomatik yüklenmeyecek, kontrol edip yükleyin</span>}
+        {closest && (
+          <span className={closest.score >= 1 ? "err" : "muted"} title="YouTube tekrarlayan içerik politikası için kanaldaki en benzer videoyla karşılaştırma">
+            Özgünlük: {closest.score >= 1 ? "⚠ " : closest.score >= 0.7 ? "dikkat, " : "iyi, "}en benzer{" "}
+            {closest.id ? <Link href={`/items/${closest.id}`}>{cleanTitle(closest.title, "")}</Link> : closest.title} ({closest.field} %{Math.round(closest.raw * 100)} örtüşüyor)
+          </span>
+        )}
       </div>
       {it.error && <div className="card err">{friendlyError(it.error)}</div>}
       {it.videoPath && !videoOk && !busy && (

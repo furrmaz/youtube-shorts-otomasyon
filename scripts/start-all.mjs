@@ -43,7 +43,8 @@ function openBrowser() {
 
 const procs = [
   ["panel", `npx next start -p ${PORT}`],
-  ["worker", "npx tsx --env-file=.env scripts/worker.ts"],
+  // Sunucuda/Docker'da ayarlar ortam değişkenlerinden gelir, .env olmayabilir
+  ["worker", `npx tsx ${fs.existsSync(".env") ? "--env-file=.env " : ""}scripts/worker.ts`],
 ];
 
 // Windows'ta kabuk üzerinden başlatılan alt süreçler ağaç olarak kapatılmalı

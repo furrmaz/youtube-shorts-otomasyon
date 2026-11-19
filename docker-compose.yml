@@ -1,0 +1,45 @@
+# Sunucuda 7/24 çalıştırma. Kurulum ve ayrıntılar: SUNUCU.md
+#   docker compose up -d --build      başlat / güncelle
+#   docker compose logs -f app        kayıtları izle
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      # Panel internete açık olacağı için şifre zorunlu
+      PANEL_PASSWORD: ${PANEL_PASSWORD:?.env dosyasına PANEL_PASSWORD yazın}
+      APP_URL: https://${DOMAIN:?.env dosyasına DOMAIN yazın}
+      TZ: ${TZ:-Europe/Istanbul}
+      # Veriler kalıcı klasörde (./data); .env'deki yerel ayarlar bunları ezmesin
+      DATABASE_URL: file:/data/shorts.db
+      MEDIA_DIR: /data/media
+      MUSIC_DIR: /data/music
+    volumes:
+      - ./data:/data
+    # Panel sadece Caddy üzerinden (HTTPS) erişilir, 3000 portu dışarı açılmaz
+    expose:
+      - "3000"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
