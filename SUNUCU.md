@@ -82,3 +82,9 @@ Videolar diski doldurursa eski `media` klasörlerini silebilirsiniz (YouTube'a y
 ## Docker olmadan (ileri düzey)
 
 Node.js 22 ve ffmpeg kuruluysa `npm ci && npx prisma db push && npx next build` sonrasında `NO_BROWSER=1 PANEL_PASSWORD=... node scripts/start-all.mjs` komutunu bir systemd servisi olarak çalıştırabilirsiniz. Docker yolu daha az bakım ister, önerilen odur.
+
+## Terminalsiz yönetim: Shorts Yönetici (Windows)
+
+`yonetici/` klasöründeki küçük uygulama sunucu işlerini düğmelere çevirir: durum, güncelle, paneli yeniden başlat, kayıtlar, yedek, HTTPS'i yenile, panel şifresini değiştir. Çift tıklayınca tarayıcıda yerel bir sayfa açılır. İlk açılışta sunucu parolası bir kez sorulur; uygulama kendi SSH anahtarını sunucuya ekler, parola kaydedilmez.
+
+Derlemek için (Go 1.26+): `cd yonetici && GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H windowsgui" -o ShortsYonetici.exe .`

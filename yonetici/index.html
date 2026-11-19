@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shorts Yönetici</title>
+<style>
+  :root { --bg:#14161a; --card:#1d2026; --line:#2c3038; --text:#e8eaee; --muted:#9aa1ad; --accent:#ffd27a; --red:#ff6b6b; --green:#5fd38d; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  main { max-width:880px; margin:0 auto; padding:24px 16px 40px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:10px; }
+  button { background:#2a2e36; color:var(--text); border:1px solid var(--line); border-radius:10px; padding:12px; font:inherit; cursor:pointer; text-align:left; }
+  button:hover:not(:disabled) { border-color:var(--accent); }
+  button:disabled { opacity:.5; cursor:wait; }
+  button b { display:block; }
+  button small { color:var(--muted); }
+  button.main { background:var(--accent); color:#1b1b1b; border:none; font-weight:600; text-align:center; }
+  button.danger:hover:not(:disabled) { border-color:var(--red); }
+  input { width:100%; background:#111317; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font:inherit; }
+  label { display:block; color:var(--muted); font-size:13px; margin:8px 0 4px; }
+  .row { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:160px; }
+  pre { background:#0d0f12; border:1px solid var(--line); border-radius:10px; padding:12px; min-height:180px; max-height:420px; overflow:auto; white-space:pre-wrap; word-break:break-word; font:13px/1.45 Consolas, monospace; margin:0; }
+  .ok { color:var(--green); } .err { color:var(--red); }
+  .status { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+  details summary { cursor:pointer; color:var(--muted); }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Shorts Yönetici</h1>
+  <p class="sub">Sunucudaki paneli terminal açmadan yönet. Bu pencereyi kapatınca uygulama da kapanır.</p>
+
+  <section class="card" id="setup" hidden>
+    <b>İlk bağlantı</b>
+    <p class="sub" style="margin:4px 0 8px">Sunucu parolasını bir kez gir. Uygulama kendine özel bir anahtar oluşturup sunucuya ekler; parola hiçbir yere kaydedilmez, sonraki açılışlarda sorulmaz.</p>
+    <div class="row">
+      <div><label>Sunucu (root) parolası</label><input id="rootpw" type="password" autocomplete="off"></div>
+      <button class="main" id="setupBtn" style="flex:0 0 auto">Bağlan</button>
+    </div>
+    <p id="setupMsg"></p>
+  </section>
+
+  <section class="card status">
+    <div><b id="dom"></b><br><small class="sub" id="srv"></small></div>
+    <button class="main" onclick="fetch('/api/open')">Paneli aç</button>
+  </section>
+
+  <section class="card">
+    <div class="grid">
+      <button data-a="durum"><b>Durum</b><small>Çalışıyor mu, disk, sürüm</small></button>
+      <button data-a="guncelle"><b>Güncelle</b><small>Son sürümü kur (5-10 dk)</small></button>
+      <button data-a="yeniden"><b>Paneli yeniden başlat</b><small>Takılırsa</small></button>
+      <button data-a="kayitlar"><b>Kayıtlar</b><small>Son 150 satır</small></button>
+      <button data-a="yedek"><b>Yedek al</b><small>Veritabanı yedeği</small></button>
+      <button data-a="caddy"><b>HTTPS'i yenile</b><small>Site açılmazsa (Temelim birkaç sn kesilir)</small></button>
+      <button data-a="sunucuyeni" class="danger"><b>Sunucuyu yeniden başlat</b><small>Son çare, 1-2 dk</small></button>
+    </div>
+  </section>
+
+  <section class="card">
+    <pre id="out">Bir işlem seç.</pre>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>Panel şifresini değiştir</summary>
+      <div class="row" style="margin-top:8px">
+        <div><label>Yeni panel şifresi (en az 8 karakter)</label><input id="newpw" type="password" autocomplete="new-password"></div>
+        <button id="pwBtn" style="flex:0 0 auto">Değiştir</button>
+      </div>
+    </details>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>Sunucu bilgileri</summary>
+      <div class="row" style="margin-top:8px">
+        <div><label>IP adresi</label><input id="host"></div>
+        <div><label>SSH portu</label><input id="port"></div>
+        <div><label>Kullanıcı</label><input id="user"></div>
+        <div><label>Panel adresi</label><input id="domain"></div>
+      </div>
+      <p><button id="saveCfg">Kaydet</button></p>
+    </details>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const out = $("out");
+let busy = false;
+
+setInterval(() => fetch("/api/ping").catch(() => {}), 10000);
+fetch("/api/ping");
+
+async function loadCfg() {
+  const c = await (await fetch("/api/config")).json();
+  $("dom").textContent = "https://" + c.domain;
+  $("srv").textContent = `${c.user}@${c.host}:${c.port}`;
+  for (const k of ["host", "port", "user", "domain"]) $(k).value = c[k];
+  $("setup").hidden = !!c.keyOk;
+}
+loadCfg();
+
+$("saveCfg").onclick = async () => {
+  await fetch("/api/config", { method: "POST", body: JSON.stringify({ host: $("host").value, port: $("port").value, user: $("user").value, domain: $("domain").value }) });
+  loadCfg();
+};
+
+$("setupBtn").onclick = async () => {
+  $("setupMsg").textContent = "Bağlanılıyor…";
+  $("setupMsg").className = "";
+  const r = await (await fetch("/api/setup", { method: "POST", body: JSON.stringify({ Password: $("rootpw").value }) })).json();
+  $("rootpw").value = "";
+  if (r.ok) { $("setupMsg").textContent = ""; loadCfg(); run("durum"); }
+  else { $("setupMsg").textContent = "Olmadı: " + r.error; $("setupMsg").className = "err"; }
+};
+
+function run(a) {
+  if (busy) return;
+  busy = true;
+  document.querySelectorAll("button[data-a], #pwBtn").forEach((b) => (b.disabled = true));
+  out.textContent = "";
+  out.className = "";
+  const es = new EventSource("/api/run?a=" + a);
+  es.addEventListener("line", (e) => { out.textContent += JSON.parse(e.data) + "\n"; out.scrollTop = out.scrollHeight; });
+  es.addEventListener("end", (e) => {
+    const m = JSON.parse(e.data);
+    if (m) { out.textContent += m + "\n"; out.className = m.startsWith("HATA") ? "err" : ""; }
+    if (!out.textContent.trim()) out.textContent = "Bitti.";
+    es.close();
+    busy = false;
+    document.querySelectorAll("button[data-a], #pwBtn").forEach((b) => (b.disabled = false));
+  });
+  es.onerror = () => es.dispatchEvent(new MessageEvent("end", { data: JSON.stringify("HATA: bağlantı koptu") }));
+}
+
+document.querySelectorAll("button[data-a]").forEach((b) => {
+  b.onclick = () => {
+    const a = b.dataset.a;
+    if (a === "sunucuyeni" && !confirm("Sunucu yeniden başlatılsın mı? Temelim de 1-2 dakika kapalı kalır.")) return;
+    if (a === "caddy" && !confirm("HTTPS yenilensin mi? Temelim birkaç saniye kesilir.")) return;
+    run(a);
+  };
+});
+
+$("pwBtn").onclick = async () => {
+  const pw = $("newpw").value;
+  if (pw.length < 8) { alert("Şifre en az 8 karakter olmalı"); return; }
+  await fetch("/api/pw", { method: "POST", body: JSON.stringify({ Password: pw }) });
+  $("newpw").value = "";
+  run("sifre");
+};
+</script>
+</body>
+</html>
