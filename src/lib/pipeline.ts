@@ -152,6 +152,11 @@ export async function produceItem(id: string) {
   if (!claimed.count) return;
   busy.add(id);
   const progress = (m: string | null) => prisma.contentItem.update({ where: { id }, data: { progress: m } }).then(() => undefined);
+  // Canlılık sinyali: üretim sürdükçe kayıt 30 sn'de bir dokunulur. Sinyal kesilirse (sunucu
+  // güncellendi/yeniden başladı) zamanlayıcı işi yarıda kalmış sayıp kaldığı yerden sürdürür.
+  const alive = setInterval(() => {
+    prisma.contentItem.updateMany({ where: { id, status: "PRODUCING" }, data: { updatedAt: new Date() } }).catch(() => {});
+  }, 30_000);
   try {
     const item = await prisma.contentItem.findUniqueOrThrow({ where: { id } });
     const s = await channelSettings(item.channelId);
@@ -163,7 +168,33 @@ export async function produceItem(id: string) {
     await prisma.contentItem.update({ where: { id }, data: { status: "FAILED", error: explain(e), progress: null } });
     await log(`Üretim hatası: ${explain(e)}`, { itemId: id, level: "error" });
   } finally {
+    clearInterval(alive);
     busy.delete(id);
+  }
+}
+
+/**
+ * Sunucu yeniden başlarken (ör. güncelleme) yarıda kalan üretimleri bulur ve kaldığı yerden sürdürür.
+ * Ses ve sahne görselleri önbellekte olduğu için sadece eksik kısımlar yeniden yapılır.
+ */
+export async function resumeOrphaned() {
+  const stale = new Date(Date.now() - 3 * 60_000);
+  const orphans = await prisma.contentItem.findMany({
+    where: { status: "PRODUCING", updatedAt: { lt: stale } },
+    select: { id: true, attempts: true },
+  });
+  for (const o of orphans) {
+    if (busy.has(o.id)) continue;
+    if (o.attempts >= 10) {
+      await prisma.contentItem.update({
+        where: { id: o.id },
+        data: { status: "FAILED", error: "Üretim defalarca yarıda kaldı; \"Yeniden üret\" ile tekrar deneyin", progress: null },
+      });
+      continue;
+    }
+    await prisma.contentItem.update({ where: { id: o.id }, data: { status: "FAILED", progress: null } });
+    await log("Üretim yarıda kalmıştı (sunucu yeniden başladı), kaldığı yerden sürdürülüyor", { itemId: o.id, level: "warn" });
+    void produceItem(o.id);
   }
 }
 
@@ -590,9 +621,12 @@ export async function tick() {
 
   await refreshStats();
 
-  // Takılı kalmış işler (ör. süreç çöktü): 1 saatten eskiyse FAILED yap
+  // Yarıda kalan üretimleri sürdür (canlılık sinyali 3 dk'dır gelmiyorsa)
+  await resumeOrphaned();
+
+  // Takılı kalmış diğer işler (ör. süreç çöktü): 1 saatten eskiyse FAILED yap
   await prisma.contentItem.updateMany({
-    where: { status: { in: ["WRITING", "PRODUCING", "UPLOADING"] }, updatedAt: { lt: new Date(now - 3600_000) } },
+    where: { status: { in: ["WRITING", "UPLOADING"] }, updatedAt: { lt: new Date(now - 3600_000) } },
     data: { status: "FAILED", error: "İşlem yarıda kaldı, tekrar deneyin", progress: null },
   });
 }
