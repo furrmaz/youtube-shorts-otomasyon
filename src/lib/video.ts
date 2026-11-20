@@ -286,6 +286,16 @@ export type RenderFx = {
   vignette?: boolean; // kenar karartma
 };
 
+/** Son birleştirmede yüzde gösterir (en fazla 10 sn'de bir kaydeder) */
+function finalProgress(cb: ((m: string) => unknown) | undefined, label: string, total: number) {
+  let last = 0;
+  return (sec: number) => {
+    if (!cb || !total || Date.now() - last < 10_000) return;
+    last = Date.now();
+    void Promise.resolve(cb(`${label} %${Math.min(99, Math.round((sec / total) * 100))}`)).catch(() => {});
+  };
+}
+
 /** Tek sahne klibi: katmanlı görsel varsa 2.5D parallax, yoksa klasik Ken Burns */
 async function sceneClip(i: number, image: string, frames: number, motion: Motion, out: string) {
   const layer = (l: string) => image.replace(/\.png$/, `_${l}.png`);
@@ -454,7 +464,7 @@ export async function renderVideo(opts: {
     ...FINAL_VIDEO, "-r", String(FPS),
     "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
     outPath,
-  ]);
+  ], { onTime: finalProgress(opts.onProgress, "Montaj: birleştirme, altyazı ve ses", total) });
 
   // ara dosyaları temizle
   await Promise.all(clips.map((c) => fs.rm(c, { force: true })));
