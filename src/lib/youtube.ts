@@ -159,3 +159,39 @@ export async function fetchStats(channelId: string, videoIds: string[]): Promise
   }
   return out;
 }
+
+export type RecentComment = { id: string; text: string; publishedAt: string; videoId: string };
+
+/** Videolara gelen, `since` sonrası yazılmış üst düzey yorumlar (video başına en fazla 200) */
+export async function recentComments(channelId: string, videoIds: string[], since: Date | null): Promise<RecentComment[]> {
+  const auth = await authedClient(channelId);
+  const yt = google.youtube({ version: "v3", auth });
+  const out: RecentComment[] = [];
+  for (const videoId of videoIds) {
+    let pageToken: string | undefined;
+    for (let page = 0; page < 2; page++) {
+      let res;
+      try {
+        res = await yt.commentThreads.list({ part: ["snippet"], videoId, maxResults: 100, pageToken, order: "time", textFormat: "plainText" });
+      } catch (e) {
+        // Yorumları kapalı videolar 403 döner; diğerlerine devam edilir
+        if (/disabled comments|commentsDisabled|403/i.test((e as Error).message)) break;
+        throw e;
+      }
+      let old = false;
+      for (const t of res.data.items ?? []) {
+        const c = t.snippet?.topLevelComment?.snippet;
+        const at = c?.publishedAt ?? "";
+        if (since && at && new Date(at) <= since) {
+          old = true;
+          continue;
+        }
+        const text = (c?.textOriginal ?? c?.textDisplay ?? "").trim();
+        if (text) out.push({ id: t.id ?? "", text, publishedAt: at, videoId });
+      }
+      pageToken = res.data.nextPageToken ?? undefined;
+      if (!pageToken || old) break;
+    }
+  }
+  return out;
+}

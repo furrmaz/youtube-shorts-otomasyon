@@ -88,7 +88,12 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
                   <input type="datetime-local" name="publishAt" defaultValue={toLocalInput(it.publishAt, s.timezone)} disabled={!editable} />
                 </div>
               </div>
-              <label>Kanca</label>
+              <label>
+                Kanca{" "}
+                {it.hookOptions && editable && (
+                  <Link href={`/items/${it.id}#kanca`} className="muted">({(JSON.parse(it.hookOptions) as string[]).length} öneri var, seç →)</Link>
+                )}
+              </label>
               <input name="hook" defaultValue={it.hook} disabled={!editable} />
               <label>Metin ({it.script.split(/\s+/).length} kelime)</label>
               <textarea name="script" defaultValue={it.script} disabled={!editable} />

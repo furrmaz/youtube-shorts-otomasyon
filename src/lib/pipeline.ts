@@ -19,6 +19,8 @@ import { uploadReel } from "./instagram";
 import { channelSettings, listChannels, type ChannelSettings } from "./channels";
 import { addDaysYmd, parsePublishTimes, ymdInTz, zonedToUtc } from "./time";
 import { avoidLines, channelCorpus, describeMatch, findDuplicate, overusedOpeners, seedOf } from "./originality";
+import { paletteRule } from "./look";
+import { ideaBrief, markIdeasUsed, scanIdeas } from "./ideas";
 
 /** API hatalarını anlaşılır Türkçe mesaja çevirir */
 function explain(e: unknown): string {
@@ -47,7 +49,17 @@ function promoCardOf(s: ChannelSettings): Overlays["promoCard"] {
   return { title: name, cta: ch.cta || url, url: ch.cta ? url : "", color: ch.primaryColor, start: 0, end: 0 };
 }
 
-const brandOf = (s: ChannelSettings) => ({ primaryColor: s.channel.primaryColor, logoPath: s.channel.logoPath });
+const brandOf = (s: ChannelSettings) => ({ primaryColor: s.look.primary, logoPath: s.channel.logoPath });
+
+/** Altyazı ve kartlar için kanalın görsel dili */
+const assLookOf = (s: ChannelSettings) => ({
+  font: s.look.font?.family,
+  tracking: s.look.font?.tracking ?? 0,
+  captionMaxChars: s.look.captionMaxChars,
+  primary: s.look.primary,
+  accent: s.look.accent,
+  dark: s.look.dark,
+});
 
 // Aynı süreç içinde paralel çalışmayı engelleyen basit kilit
 const g = globalThis as unknown as { __busy?: Set<string>; __calendarJobs?: Map<string, CalendarJob> };
@@ -84,7 +96,8 @@ export async function generateCalendar(channelId: string, days = 30) {
     const researchFor = promo
       ? { ...s, niche: `${s.channel.targetAudience || s.channel.productName} — günlük iş sorunları, ${s.channel.productProblem}` }
       : s;
-    const research = (await researchNiche(researchFor)) + (await performanceNotes(channelId));
+    const ideas = await ideaBrief(channelId, total);
+    const research = (await researchNiche(researchFor)) + (await performanceNotes(channelId)) + ideas.text;
     await log(`[${s.channel.name}] Araştırma tamamlandı`);
 
     // Özgünlük: kanalın önceki videoları + bu takvimde yazılanlar ile karşılaştırılır
@@ -117,7 +130,7 @@ export async function generateCalendar(channelId: string, days = 30) {
             channelId,
             dayIndex: lastIndex + day + 1,
             publishAt: zonedToUtc(addDaysYmd(startDay, day), times[slot], s.timezone),
-            ...itemFields(it),
+            ...itemFields(it, s),
           },
         });
         avoid.unshift(avoidLines([it])[0]);
@@ -125,7 +138,8 @@ export async function generateCalendar(channelId: string, days = 30) {
       }
       if (!items.length) break;
     }
-    job.message = `Tamamlandı: ${made} video planlandı${skipped ? ` (${skipped} benzer metin elendi)` : ""}`;
+    await markIdeasUsed(ideas.ids);
+    job.message = `Tamamlandı: ${made} video planlandı${skipped ? ` (${skipped} benzer metin elendi)` : ""}${ideas.ids.length ? `, ${ideas.ids.length} izleyici isteği kullanıldı` : ""}`;
     await log(`[${s.channel.name}] ${job.message}`);
   } catch (e) {
     job.error = explain(e);
@@ -136,10 +150,19 @@ export async function generateCalendar(channelId: string, days = 30) {
   }
 }
 
-const itemFields = (it: CalendarItemT) => ({
-  topic: it.topic, hook: it.hook, script: it.script, title: it.title,
-  description: it.description, tags: JSON.stringify(it.tags),
-});
+/** Claude çıktısını kayda çevirir; kanalın sabit kapanış cümlesi metinde yoksa sona eklenir */
+const itemFields = (it: CalendarItemT, s?: ChannelSettings) => {
+  const end = s?.channel.endLine.trim();
+  const norm = (t: string) => t.toLocaleLowerCase("tr").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  let script = it.script.trim();
+  if (end && !norm(script).endsWith(norm(end))) script = `${script} ${/[.!?…]$/.test(end) ? end : `${end}.`}`;
+  const options = [it.hook, ...(it.hookOptions ?? [])].map((h) => h.trim()).filter((h, i, a) => h && a.indexOf(h) === i);
+  return {
+    topic: it.topic, hook: it.hook, script, title: it.title,
+    description: it.description, tags: JSON.stringify(it.tags),
+    hookOptions: options.length > 1 ? JSON.stringify(options.slice(0, 5)) : null,
+  };
+};
 
 /** Tek bir içeriği uçtan uca videoya dönüştürür */
 export async function produceItem(id: string) {
@@ -229,7 +252,7 @@ async function produceStandard(item: ContentItem, s: ChannelSettings, progress: 
 
   // 1) Ses + kelime zamanları
   const { audioPath, words, duration } = await voiceFor(item, s, dir, item.script);
-  const limit = isStory ? 175 : 62;
+  const limit = isStory ? 175 : Math.max(62, s.channel.infoSeconds + 15);
   if (duration > limit) await log(`Uyarı: ses ${duration.toFixed(0)} sn, ${limit} sn üstü`, { itemId: id, level: "warn" });
 
   // 2) Sahne planı (görsel istemleri)
@@ -244,11 +267,15 @@ async function produceStandard(item: ContentItem, s: ChannelSettings, progress: 
     const promoChars = `The product "${s.channel.productName}" is software: show it as a simple glowing app screen/dashboard with abstract UI blocks (no readable text). Brand colors ${s.channel.primaryColor} and ${s.channel.accentColor}.`;
     const ref = s.styleGuide;
     const refN = ref ? Math.min(40, Math.max(4, Math.round(duration / Math.max(1.2, ref.avgSceneSeconds)))) : 0;
+    const statCards = !isStory && s.look.statCards;
+    // Uzun bilgi videolarında sahne sayısı süreyle artar (~5 sn'de bir görüntü değişir)
+    const perScene = Math.max(9, Math.round(duration / 5));
     const plan = ref
       ? await planScenes(s, item.script, item.topic, {
           minScenes: Math.max(3, refN - 2),
           maxScenes: refN + 2,
           characters: isStory ? characters : isPromo ? promoChars : undefined,
+          statCards,
         })
       : isStory
       ? await planScenes(s, item.script, item.topic, {
@@ -257,13 +284,17 @@ async function produceStandard(item: ContentItem, s: ChannelSettings, progress: 
           characters,
         })
       : await planScenes(s, item.script, item.topic, {
-          minScenes: isPromo ? 7 : 9,
-          maxScenes: isPromo ? 10 : 13,
+          minScenes: isPromo ? 7 : perScene,
+          maxScenes: isPromo ? 10 : perScene + 4,
           characters: isPromo ? promoChars : undefined,
+          statCards,
         });
+    const colors = paletteRule(s.look);
     const styled = plan.scenes.map((sc) => ({
       text: sc.text,
-      imagePrompt: `${s.visualStyle}. ${plan.styleAnchor}. ${sc.imagePrompt}. Vertical 9:16 composition, no text, no letters, no watermark.`,
+      imagePrompt: `${s.visualStyle}. ${plan.styleAnchor}. ${sc.imagePrompt}.${colors ? ` ${colors}` : ""} Vertical 9:16 composition, no text, no letters, no watermark.`,
+      ...(statCards && sc.stats.length ? { stats: sc.stats.slice(0, 3) } : {}),
+      ...(statCards && sc.pitch !== "none" ? { pitch: sc.pitch } : {}),
     }));
     scenes = timeScenes(styled, words, duration);
     await log(`${scenes.length} sahne planlandı`, { itemId: id });
@@ -297,19 +328,23 @@ async function produceStandard(item: ContentItem, s: ChannelSettings, progress: 
   const outPath = path.join(dir, "short.mp4");
   await renderVideo({
     dir, scenes, audioPath, words, outPath,
-    motion: s.styleGuide?.motion ?? (isStory ? "slow" : "normal"),
-    transition: s.styleGuide?.transition ?? (isStory ? "fade" : "varied"),
+    // Sade kurgu: zıplayan efektler yerine yumuşak geçiş ve yavaş kamera
+    motion: s.look.simpleMotion ? "slow" : s.styleGuide?.motion ?? (isStory ? "slow" : "normal"),
+    transition: s.look.simpleMotion ? "fade" : s.styleGuide?.transition ?? (isStory ? "fade" : "varied"),
     endCardSeconds: isStory && item.choiceA ? 5 : isPromo ? 3 : 0,
     variant: seedOf(id),
     musicVolume: s.musicVolume,
     musicPath: await musicFor(s, isStory, duration, (m, warn) => log(m, { itemId: id, level: warn ? "warn" : "info" })),
-    fx: { particles: s.particles, progressBar: s.progressBar, sfx: s.sfx, vignette: true },
+    fx: { particles: s.particles && !s.look.simpleMotion, progressBar: s.progressBar, sfx: s.sfx, vignette: true },
     brand: brandOf(s),
+    fontsDir: s.look.font?.dir,
+    statCards: !isStory && s.look.statCards,
     onProgress: progress,
     overlays: {
-      subtitleStyle: s.subtitleStyle as "karaoke" | "minimal" | "off",
+      subtitleStyle: s.subtitleStyle as "karaoke" | "minimal" | "line" | "off",
       watermark: s.watermark,
-      highlight: s.channel.primaryColor,
+      highlight: s.look.primary,
+      look: assLookOf(s),
       ...(!isStory && s.hookText ? { hook: hookOf(item.title, item.topic) } : {}),
       ...(isPromo ? { promoCard: promoCardOf(s) } : {}),
       ...(isStory
@@ -370,11 +405,13 @@ async function produceClip(item: ContentItem, s: ChannelSettings, progress: Prog
     endCardSeconds: 3,
     brand: brandOf(s),
     fx: { progressBar: s.progressBar },
+    fontsDir: s.look.font?.dir,
     musicVolume: s.musicVolume,
     musicPath: await musicFor(s, false, 60, (m, warn) => log(m, { itemId: item.id, level: warn ? "warn" : "info" })),
     overlays: {
-      subtitleStyle: s.subtitleStyle as "karaoke" | "minimal" | "off",
-      highlight: s.channel.primaryColor,
+      subtitleStyle: s.subtitleStyle as "karaoke" | "minimal" | "line" | "off",
+      highlight: s.look.primary,
+      look: assLookOf(s),
       hook: s.hookText ? plan.hook : undefined,
       promoCard: promoCardOf(s),
     },
@@ -534,8 +571,25 @@ export async function publishItem(id: string, opts: { force?: boolean } = {}) {
       { p: "instagram" as const, on: ch.toInstagram, done: !!item.instagramId, when: due },
     ].filter((t) => t.on && has(t.p));
 
+    // YouTube, kısa sürede çok yükleme yapan kanalları sınırlıyor (örnek videoda günde ~5'te kesildi).
+    // Otomatik yüklemede 24 saatlik sınır aşılıyorsa YouTube bir sonraki tura bırakılır; elle yükleme sınırı aşar.
+    let ytBlocked = false;
+    if (!opts.force && ch.maxUploadsPerDay > 0 && targets.some((t) => t.p === "youtube" && !t.done)) {
+      const recent = await prisma.contentItem.count({
+        where: { channelId: ch.id, uploadedAt: { gte: new Date(Date.now() - 86400_000) } },
+      });
+      if (recent >= ch.maxUploadsPerDay) {
+        ytBlocked = true;
+        const msg = `YouTube günlük yükleme sınırı (${ch.maxUploadsPerDay}/24 saat) doldu; sıradaki uygun saatte otomatik yüklenecek`;
+        if (item.progress !== msg) {
+          await log(msg, { itemId: id });
+          update.progress = msg;
+        }
+      }
+    }
     for (const t of targets) {
       if (t.done || !t.when || !retryOk(plog[t.p])) continue;
+      if (t.p === "youtube" && ytBlocked) continue;
       try {
         if (t.p === "youtube") {
           update.youtubeVideoId = await uploadShort({
@@ -544,6 +598,8 @@ export async function publishItem(id: string, opts: { force?: boolean } = {}) {
             categoryId: isPromoChannel(s) || item.kind !== "standard" ? "28" : "27",
           });
           plog.youtube = { ok: update.youtubeVideoId, at: new Date().toISOString() };
+          update.uploadedAt = new Date();
+          update.progress = null;
           await log(`YouTube'a yüklendi: https://youtube.com/shorts/${update.youtubeVideoId}`, { itemId: id });
         } else if (t.p === "tiktok") {
           update.tiktokId = await uploadTiktok({ channelId: ch.id, filePath: item.videoPath, caption, mode: ch.tiktokMode });
@@ -621,6 +677,18 @@ export async function tick() {
 
   await refreshStats();
 
+  // İzleyici yorumlarından konu istekleri (kanal başına 12 saatte bir)
+  for (const ch of channels) {
+    if (ch.contentFormat === "story") continue;
+    if (ch.ideasScanAt && Date.now() - ch.ideasScanAt.getTime() < 12 * 3600_000) continue;
+    if (!withConn.includes(ch.id)) continue;
+    try {
+      await scanIdeas(ch.id);
+    } catch (e) {
+      await log(`[${ch.name}] Yorumlar taranamadı: ${explain(e)}`, { level: "warn" });
+    }
+  }
+
   // Yarıda kalan üretimleri sürdür (canlılık sinyali 3 dk'dır gelmiyorsa)
   await resumeOrphaned();
 
@@ -662,7 +730,7 @@ export async function refreshStats(force = false, channelId?: string) {
 }
 
 /** Kanalın en iyi ve en zayıf videoları: Claude yeni konu seçerken bunlardan öğrenir */
-async function performanceNotes(channelId: string): Promise<string> {
+export async function performanceNotes(channelId: string): Promise<string> {
   const rated = await prisma.contentItem.findMany({
     where: { channelId, views: { not: null }, publishAt: { lt: new Date(Date.now() - 2 * 86400_000) } },
     orderBy: { views: "desc" },
@@ -680,7 +748,10 @@ async function performanceNotes(channelId: string): Promise<string> {
  * İstenildiği anda tek video: Claude metni yazar, video üretilir,
  * `publishNow` ise hemen yüklenir; değilse "Hazır"da bekler.
  */
-export async function createQuickVideo(channelId: string, opts: { topicHint: string; publishNow: boolean }): Promise<string> {
+export async function createQuickVideo(
+  channelId: string,
+  opts: { topicHint: string; publishNow: boolean; pickHook?: boolean; ideaId?: string },
+): Promise<string> {
   const st = await channelSettings(channelId);
   if (st.contentFormat === "story") {
     const id = await startEpisode(channelId, { publishAt: new Date(), autoUpload: opts.publishNow, topicHint: opts.topicHint });
@@ -708,11 +779,12 @@ export async function createQuickVideo(channelId: string, opts: { topicHint: str
       autoUpload: opts.publishNow,
     },
   });
-  void runQuickVideo(item.id, channelId, opts.topicHint, opts.publishNow);
+  if (opts.ideaId) await prisma.topicIdea.updateMany({ where: { id: opts.ideaId }, data: { status: "used", itemId: item.id } });
+  void runQuickVideo(item.id, channelId, opts.topicHint, opts.publishNow, !!opts.pickHook);
   return item.id;
 }
 
-async function runQuickVideo(id: string, channelId: string, topicHint: string, publishNow: boolean) {
+async function runQuickVideo(id: string, channelId: string, topicHint: string, publishNow: boolean, pickHook = false) {
   try {
     const s = await channelSettings(channelId);
     const promo = isPromoChannel(s);
@@ -741,8 +813,10 @@ async function runQuickVideo(id: string, channelId: string, topicHint: string, p
       const [again] = await write();
       if (again) it = again;
     }
-    await prisma.contentItem.update({ where: { id }, data: { ...itemFields(it), status: "APPROVED" } });
-    await log(`Metin hazır: ${it.title}`, { itemId: id });
+    // "Önce kancayı seçeyim": metin taslak olarak bekler, kullanıcı kancayı seçip "Şimdi üret"e basar
+    await prisma.contentItem.update({ where: { id }, data: { ...itemFields(it, s), status: pickHook ? "DRAFT" : "APPROVED" } });
+    await log(`Metin hazır: ${it.title}${pickHook ? " (kancayı seçip üretin)" : ""}`, { itemId: id });
+    if (pickHook) return;
     await produceItem(id);
     if (publishNow) await publishItem(id, { force: true });
   } catch (e) {
@@ -776,7 +850,7 @@ export async function createSalesVideos(channelId: string, sectors: string[]) {
       const it = await prisma.contentItem.findUniqueOrThrow({ where: { id } });
       try {
         const v = await writeSalesVideo({ ...s, ...s.channel }, it.sector!);
-        await prisma.contentItem.update({ where: { id }, data: { ...itemFields(v), shareText: v.shareText, status: "APPROVED" } });
+        await prisma.contentItem.update({ where: { id }, data: { ...itemFields(v, s), shareText: v.shareText, status: "APPROVED" } });
         await log(`Satış videosu metni hazır: ${it.sector}`, { itemId: id });
         await produceItem(id);
       } catch (e) {

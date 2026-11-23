@@ -5,8 +5,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
-import { continueEpisode, retryEpisode, createQuickVideo, createSalesVideos, generateCalendar, produceItem, refreshStats, uploadItem } from "@/lib/pipeline";
-import { ensureChannels } from "@/lib/channels";
+import { continueEpisode, retryEpisode, createQuickVideo, createSalesVideos, generateCalendar, produceItem, refreshStats, uploadItem, performanceNotes } from "@/lib/pipeline";
+import { channelSettings, ensureChannels } from "@/lib/channels";
+import { fontFamilyOf, parsePalette } from "@/lib/look";
+import { ideaKey, scanIdeas } from "@/lib/ideas";
+import { suggestHooks } from "@/lib/claude";
 import { analyzeReference, applyStyleToChannel, styleDir } from "@/lib/style";
 import { BEFWARE_PRESETS } from "@/lib/presets";
 import { CHANNEL_COOKIE, currentChannel } from "@/lib/current-channel";
@@ -105,7 +108,7 @@ export async function saveChannel(f: FormData) {
     publishTimes: str(f, "publishTimes") || "18:00",
     privacyStatus: str(f, "privacyStatus") || "public",
     autoProduce: f.get("autoProduce") === "on",
-    subtitleStyle: ["karaoke", "minimal", "off"].includes(str(f, "subtitleStyle")) ? str(f, "subtitleStyle") : "karaoke",
+    subtitleStyle: ["karaoke", "minimal", "line", "off"].includes(str(f, "subtitleStyle")) ? str(f, "subtitleStyle") : "karaoke",
     watermark: str(f, "watermark"),
     musicPrompt: str(f, "musicPrompt"),
     seriesTitle: str(f, "seriesTitle"),
@@ -126,7 +129,37 @@ export async function saveChannel(f: FormData) {
     toInstagram: f.get("toInstagram") === "on",
     tiktokMode: str(f, "tiktokMode") === "direct" ? "direct" : "draft",
     logoPath: f.get("clearLogo") === "on" ? "" : prev.logoPath,
+    // Görsel dil
+    palette: parsePalette(str(f, "palette")).join(", "),
+    fontTracking: Math.min(200, Math.max(-200, Math.round(Number(str(f, "fontTracking")) || 0))),
+    captionMaxChars: Math.min(60, Math.max(15, Math.round(Number(str(f, "captionMaxChars")) || 35))),
+    simpleMotion: f.get("simpleMotion") === "on",
+    statCards: f.get("statCards") === "on",
+    endLine: str(f, "endLine"),
+    hookExamples: String(f.get("hookExamples") ?? "").trim(),
+    infoSeconds: Math.min(170, Math.max(30, Math.round(Number(str(f, "infoSeconds")) || 55))),
+    maxUploadsPerDay: Math.min(20, Math.max(0, Math.round(Number(str(f, "maxUploadsPerDay")) || 0))),
+    fontPath: f.get("clearFont") === "on" ? "" : prev.fontPath,
+    fontFamily: f.get("clearFont") === "on" ? "" : prev.fontFamily,
   };
+  if (f.get("clearFont") === "on") await fs.rm(path.join(MEDIA_DIR, "fonts", id), { recursive: true, force: true });
+  // Kendi fontu: dosya kanalın font klasörüne kaydedilir, altyazı bu klasörden okunur
+  const font = f.get("font");
+  if (font instanceof File && font.size > 0) {
+    const buf = Buffer.from(await font.arrayBuffer());
+    const family = fontFamilyOf(buf);
+    const ext = path.extname(font.name).toLowerCase();
+    if (!family || ![".ttf", ".otf"].includes(ext)) {
+      redirect(`/channels/${id}?msg=${encodeURIComponent("Font okunamadı: .ttf veya .otf dosyası yükleyin")}#gorsel-dil`);
+    }
+    const dir = path.join(MEDIA_DIR, "fonts", id);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.mkdir(dir, { recursive: true });
+    const out = path.join(dir, `font${ext}`);
+    await fs.writeFile(out, buf);
+    data.fontPath = out;
+    data.fontFamily = family!;
+  }
   // Hikâye moduna ilk geçişte örnek videodaki görsel dili ve sade altyazıyı varsayılan yap
   if (format === "story" && prev.contentFormat !== "story") {
     if (!data.visualStyle || data.visualStyle.startsWith("flat 2D hand-drawn illustration")) data.visualStyle = STORY_VISUAL_STYLE;
@@ -225,13 +258,17 @@ export async function saveItem(f: FormData) {
   const id = str(f, "id");
   const tags = str(f, "tags").split(",").map((t) => t.trim()).filter(Boolean);
   const item = await prisma.contentItem.findUniqueOrThrow({ where: { id } });
-  const scriptChanged = item.script !== str(f, "script");
+  // Sadece kanca değiştiyse metnin ilk cümlesi de yeni kancayla değişir (seslendirilen metin kancayla başlar)
+  let script = str(f, "script");
+  const hook = str(f, "hook");
+  if (script === item.script && hook && hook !== item.hook && item.episodeNumber == null) script = swapHook(item.script, item.hook, hook);
+  const scriptChanged = item.script !== script;
   await prisma.contentItem.update({
     where: { id },
     data: {
       topic: str(f, "topic"),
-      hook: str(f, "hook"),
-      script: str(f, "script"),
+      hook,
+      script,
       title: str(f, "title"),
       description: str(f, "description"),
       tags: JSON.stringify(tags),
@@ -442,8 +479,113 @@ export async function testKeys() {
 export async function quickVideo(f: FormData) {
   await requireAuth();
   const ch = await currentChannel();
-  const id = await createQuickVideo(ch.id, { topicHint: str(f, "topic"), publishNow: str(f, "mode") === "publish" });
+  const id = await createQuickVideo(ch.id, {
+    topicHint: str(f, "topic"),
+    publishNow: str(f, "mode") === "publish",
+    pickHook: str(f, "mode") === "hook",
+    ideaId: str(f, "ideaId") || undefined,
+  });
   redirect(`/items/${id}`);
+}
+
+// ---------------- Kanca seçimi ----------------
+
+/** Metnin ilk cümlesini yeni kancayla değiştirir */
+function swapHook(script: string, oldHook: string, hook: string) {
+  const body = script.trim();
+  if (oldHook && body.startsWith(oldHook.trim())) return `${hook} ${body.slice(oldHook.trim().length).trim()}`.trim();
+  const m = body.match(/^[\s\S]*?[.!?…](\s+|$)/);
+  return m ? `${hook} ${body.slice(m[0].length).trim()}`.trim() : `${hook} ${body}`;
+}
+
+/** Önerilen ya da elle yazılan kancayı uygular; ses ve sahneler yeniden üretilecek şekilde sıfırlanır */
+export async function pickHook(f: FormData) {
+  await requireAuth();
+  const id = str(f, "id");
+  const it = await prisma.contentItem.findUniqueOrThrow({ where: { id } });
+  if (["WRITING", "PRODUCING", "UPLOADING", "UPLOADED"].includes(it.status)) redirect(`/items/${id}`);
+  let hook = str(f, "custom") || str(f, "hook");
+  hook = hook.replace(/\s+/g, " ").trim();
+  if (!hook) redirect(`/items/${id}`);
+  // Seslendirme tonu için cümle sonu: soru kelimesi varsa "?", yoksa "."
+  if (!/[.!?…]$/.test(hook)) hook += /(^|\s)(ne|mı|mi|mu|mü|nasıl|neden|niye|kim|hangi)(\s|$)/iu.test(hook) ? "?" : ".";
+  const script = swapHook(it.script, it.hook, hook);
+  const options: string[] = it.hookOptions ? JSON.parse(it.hookOptions) : [];
+  if (!options.includes(hook)) options.unshift(hook);
+  await prisma.contentItem.update({
+    where: { id },
+    data: {
+      hook, script, hookOptions: JSON.stringify(options.slice(0, 8)),
+      ...(script !== it.script ? { scenes: null, videoPath: null, audioPath: null, status: it.status === "APPROVED" ? "APPROVED" : "DRAFT", error: null } : {}),
+    },
+  });
+  if (script !== it.script) await clearMedia(id);
+  if (str(f, "then") === "produce") {
+    await prisma.contentItem.updateMany({ where: { id, status: "DRAFT" }, data: { status: "APPROVED" } });
+    void produceItem(id);
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  revalidatePath("/calendar");
+  revalidatePath(`/items/${id}`);
+  redirect(`/items/${id}#kanca`);
+}
+
+/** Claude'dan bu video için 4 yeni kanca ister */
+export async function moreHooks(f: FormData) {
+  await requireAuth();
+  const id = str(f, "id");
+  const it = await prisma.contentItem.findUniqueOrThrow({ where: { id } });
+  let to = `/items/${id}#kanca`;
+  try {
+    const s = await channelSettings(it.channelId);
+    const fresh = await suggestHooks(s, it, it.channelId ? await performanceNotes(it.channelId) : "");
+    const prev: string[] = it.hookOptions ? JSON.parse(it.hookOptions) : [it.hook].filter(Boolean);
+    const all = [...prev, ...fresh].filter((h, i, a) => h && a.indexOf(h) === i).slice(-10);
+    await prisma.contentItem.update({ where: { id }, data: { hookOptions: JSON.stringify(all) } });
+  } catch (e) {
+    to = `/items/${id}?msg=${encodeURIComponent((e as Error).message)}#kanca`;
+  }
+  redirect(to);
+}
+
+// ---------------- İzleyici istekleri ----------------
+
+export async function scanIdeasNow() {
+  await requireAuth();
+  const ch = await currentChannel();
+  let q: string;
+  try {
+    const r = await scanIdeas(ch.id);
+    q = `ok=${encodeURIComponent(`${r.comments} yeni yorum okundu: ${r.added} yeni konu, ${r.bumped} tekrar`)}`;
+  } catch (e) {
+    q = `msg=${encodeURIComponent((e as Error).message)}`;
+  }
+  revalidatePath("/ideas");
+  redirect(`/ideas?${q}`);
+}
+
+export async function addIdea(f: FormData) {
+  await requireAuth();
+  const ch = await currentChannel();
+  for (const topic of str(f, "topics").split(/\n|,/).map((x) => x.trim()).filter(Boolean).slice(0, 50)) {
+    const key = ideaKey(topic);
+    if (!key) continue;
+    await prisma.topicIdea.upsert({
+      where: { channelId_key: { channelId: ch.id, key } },
+      update: { status: "new" },
+      create: { channelId: ch.id, topic: topic.slice(0, 120), key, source: "elle" },
+    });
+  }
+  revalidatePath("/ideas");
+  redirect("/ideas");
+}
+
+export async function setIdeaStatus(f: FormData) {
+  await requireAuth();
+  const status = str(f, "status");
+  if (!["new", "used", "hidden"].includes(status)) return;
+  await prisma.topicIdea.updateMany({ where: { id: str(f, "id") }, data: { status } });
+  revalidatePath("/ideas");
 }
 
 export async function refreshStatsNow() {

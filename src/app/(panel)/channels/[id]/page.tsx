@@ -5,6 +5,7 @@ import { cfg } from "@/lib/config";
 import { getSettings } from "@/lib/settings";
 import { listVoices, type Voice } from "@/lib/tts";
 import { connectInstagram, connectTiktok, deleteChannel, disconnectPlatform, saveChannel } from "@/app/actions";
+import { parsePalette } from "@/lib/look";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,7 @@ export default async function ChannelPage({ params, searchParams }: { params: Pr
   const voiceKnown = voices.some((v) => v.voice_id === c.elevenVoiceId);
   const promo = c.contentFormat === "promo";
   const story = c.contentFormat === "story";
+  const palette = parsePalette(c.palette);
 
   return (
     <>
@@ -211,6 +213,7 @@ export default async function ChannelPage({ params, searchParams }: { params: Pr
             <label>Altyazı</label>
             <select name="subtitleStyle" defaultValue={c.subtitleStyle}>
               <option value="karaoke">Büyük, kelime kelime vurgulu</option>
+              <option value="line">Tek satır, gölgeli (en fazla {c.captionMaxChars} harf)</option>
               <option value="minimal">Sade, alt kısımda</option>
               <option value="off">Kapalı</option>
             </select>
@@ -225,6 +228,76 @@ export default async function ChannelPage({ params, searchParams }: { params: Pr
           </div>
         </div>
 
+        <h2 id="gorsel-dil">Görsel dil ve metin</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Her videoda aynı renkler, aynı font ve aynı kapanış: kanal tanınır, &quot;yapay zekâ yaptı&quot; hissi azalır.
+        </p>
+        <div className="two">
+          <div>
+            <label>Renk paleti (en fazla 4 renk, ör. colorhunt.co&apos;dan kopyala)</label>
+            <input name="palette" defaultValue={c.palette} placeholder="#7A1E2C, #F2C14E, #1B1B1B, #F5F0E6" />
+            {palette.length > 0 && (
+              <div className="row" style={{ gap: 4, marginTop: 6 }}>
+                {palette.map((p) => <span key={p} title={p} style={{ width: 28, height: 28, borderRadius: 6, background: p, border: "1px solid #333" }} />)}
+              </div>
+            )}
+            <div className="muted">Doluysa çizimler, altyazı vurgusu, kartlar ve ilerleme çubuğu bu renklerle yapılır; dışına sadece beyaz çıkılır. Boşsa yukarıdaki iki marka rengi kullanılır.</div>
+          </div>
+          <div>
+            <label>Kendi fontun (.ttf / .otf, altyazı ve başlıklarda)</label>
+            <input type="file" name="font" accept=".ttf,.otf,font/ttf,font/otf" />
+            {c.fontFamily && (
+              <div className="row">
+                <span>Yüklü: <b>{c.fontFamily}</b></span>
+                <label style={{ display: "inline-flex", gap: 4 }}>
+                  <input type="checkbox" name="clearFont" style={{ width: "auto" }} /> fontu kaldır
+                </label>
+              </div>
+            )}
+            <div className="two">
+              <div>
+                <label>Harf aralığı (Premiere tracking, ör. -40)</label>
+                <input name="fontTracking" type="number" min={-200} max={200} defaultValue={c.fontTracking} />
+              </div>
+              <div>
+                <label>Tek satır altyazıda en fazla harf</label>
+                <input name="captionMaxChars" type="number" min={15} max={60} defaultValue={c.captionMaxChars} />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="checks" style={{ marginTop: 8 }}>
+          <label title="Yumuşak geçişler, yavaş kamera, parçacık yok">
+            <input type="checkbox" name="simpleMotion" defaultChecked={c.simpleMotion} /> Sade kurgu (yumuşak geçiş, yavaş kamera, uçuşan efekt yok)
+          </label>
+          <label title="Metinde maç, gol, yıl gibi sayılar geçince ekranda sade bir kart çıkar; futbolda mevki saha çiziminde gösterilir">
+            <input type="checkbox" name="statCards" defaultChecked={c.statCards} /> İstatistik kartları (ör. 116 MAÇ · 20 GOL, saha üzerinde mevki)
+          </label>
+        </div>
+        <div className="two">
+          <div>
+            <label>Sabit kapanış cümlesi (her videonun son cümlesi)</label>
+            <input name="endLine" defaultValue={c.endLine} placeholder="ör. Merak ettiğin efsaneyi yoruma yaz, serinin diğer videosunda onu anlatalım." />
+            <div className="muted">Yorum getirir; yorumlarda istenen konular <Link href="/ideas">İzleyici istekleri</Link> sayfasına düşer.</div>
+          </div>
+          {!story ? (
+            <div>
+              <label>Video süresi (saniye, 30-170)</label>
+              <input name="infoSeconds" type="number" min={30} max={170} defaultValue={c.infoSeconds} />
+              <div className="muted">Örnek futbol kanalında 60-90 sn&apos;lik videolar ortalama ~1 dk izlendi.</div>
+            </div>
+          ) : (
+            <input type="hidden" name="infoSeconds" value={c.infoSeconds} />
+          )}
+        </div>
+        <label>Beğendiğin kanca örnekleri (satır satır; Claude bu tonu yakalamaya çalışır)</label>
+        <textarea
+          name="hookExamples"
+          defaultValue={c.hookExamples}
+          style={{ minHeight: 80 }}
+          placeholder={"Her geçen sene o senenin Nijerya güzeliyle evlenen yıldız futbolcu Emenike'ye ne oldu?\nDaha ortada Icardi ve Osimhen yokken Galatasaraylıların bomba golcüsü olan Gomis'e ne oldu?"}
+        />
+
         <h2>Yayın planı</h2>
         <div className="two">
           <div>
@@ -234,6 +307,11 @@ export default async function ChannelPage({ params, searchParams }: { params: Pr
           <div>
             <label>Yayın saatleri (virgülle, ör. 12:00, 19:00)</label>
             <input name="publishTimes" defaultValue={c.publishTimes} />
+          </div>
+          <div>
+            <label>YouTube&apos;a 24 saatte en fazla otomatik yükleme (0 = sınırsız)</label>
+            <input type="number" min={0} max={20} name="maxUploadsPerDay" defaultValue={c.maxUploadsPerDay} />
+            <div className="muted">Örnek kanalda YouTube günde ~5 yüklemeden sonra engelledi. Sınır dolunca video bekler, ertesi gün yüklenir; elle &quot;Şimdi yayınla&quot; sınırı aşar.</div>
           </div>
           <div>
             <label>YouTube gizliliği</label>

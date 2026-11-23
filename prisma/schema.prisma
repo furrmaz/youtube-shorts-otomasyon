@@ -104,6 +104,19 @@ model Channel {
   primaryColor     String   @default("#ffd27a")
   accentColor      String   @default("#e6303b")
   logoPath         String?
+  // Görsel dil (örnek futbol videosundan): en fazla 4 renklik palet, kendi fontu, tek satır altyazı
+  palette          String   @default("") // virgülle #rrggbb listesi; boşsa ana/vurgu renkleri
+  fontPath         String   @default("") // yüklenen .ttf/.otf
+  fontFamily       String   @default("") // fontun içindeki aile adı (ASS altyazı için)
+  fontTracking     Int      @default(0)  // harf aralığı, Premiere birimi (1/1000 em), ör. -40
+  captionMaxChars  Int      @default(35) // tek satır altyazıda satır başına en fazla harf
+  simpleMotion     Boolean  @default(false) // sade kurgu: yumuşak geçiş, yavaş kamera, parçacık yok
+  statCards        Boolean  @default(true)  // metindeki sayılar için istatistik kartı (ör. 116 MAÇ · 20 GOL)
+  endLine          String   @default("") // her videonun son cümlesi, ör. "Merak ettiğin efsaneyi yoruma yaz"
+  hookExamples     String   @default("") // kullanıcının beğendiği kanca örnekleri (satır satır)
+  infoSeconds      Int      @default(55) // bilgi/tanıtım videosu hedef süresi (sn)
+  maxUploadsPerDay Int      @default(4)  // YouTube'a 24 saatte en fazla otomatik yükleme
+  ideasScanAt      DateTime?            // yorumlardan konu taramasının son zamanı
   // Hangi platformlara otomatik yüklenecek
   toYoutube        Boolean  @default(true)
   toTiktok         Boolean  @default(false)
@@ -119,6 +132,26 @@ model Channel {
   updatedAt        DateTime @updatedAt
   items            ContentItem[]
   connections      Connection[]
+  ideas            TopicIdea[]
+}
+
+// İzleyicilerin yorumlarda istediği konular (ör. "Alex'i de anlatın")
+model TopicIdea {
+  id        String   @id @default(cuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  topic     String
+  key       String   // karşılaştırma için sadeleştirilmiş konu
+  count     Int      @default(1) // kaç farklı yorumda istendi
+  example   String   @default("") // örnek yorum
+  source    String   @default("yorum") // yorum | elle
+  status    String   @default("new") // new | used | hidden
+  itemId    String?  // bu konudan üretilen video
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([channelId, key])
+  @@index([channelId, status])
 }
 
 // Kanalın platform hesapları (YouTube, TikTok, Instagram)
@@ -154,6 +187,7 @@ model ContentItem {
   publishAt      DateTime
   topic          String
   hook           String
+  hookOptions    String?   // JSON dizi: Claude'un önerdiği alternatif kancalar
   script         String
   title          String
   description    String
@@ -164,6 +198,7 @@ model ContentItem {
   audioPath      String?
   videoPath      String?
   youtubeVideoId String?
+  uploadedAt     DateTime? // YouTube'a yüklendiği an (günlük yükleme sınırı için)
   error          String?
   attempts       Int       @default(0)
   autoUpload     Boolean   @default(true) // false: hazır olunca bekler, elle yüklenir

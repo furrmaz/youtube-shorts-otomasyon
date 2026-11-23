@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 import { formatLocal } from "@/lib/time";
 import type { Scene } from "@/lib/video";
-import { continueStory, produceNow, rewriteEpisode, redrawScene, regenerateMedia, rerenderVideo, setStatus, uploadNow } from "@/app/actions";
+import { continueStory, moreHooks, pickHook, produceNow, rewriteEpisode, redrawScene, regenerateMedia, rerenderVideo, setStatus, uploadNow } from "@/app/actions";
 import { STATUS_TR, cleanTitle, friendlyError } from "@/app/status";
 import { exists } from "@/lib/paths";
 import { channelCorpus, compare } from "@/lib/originality";
@@ -53,6 +53,9 @@ export default async function ItemPage({ params, searchParams }: { params: Promi
     : null;
   const v = it.updatedAt.getTime();
   const busy = ["WRITING", "PRODUCING", "UPLOADING"].includes(it.status);
+  const hookOptions: string[] = it.hookOptions ? JSON.parse(it.hookOptions) : [];
+  // Kanca seçimi: hikâye bölümleri ve demo klipleri hariç, yayınlanmamış videolarda
+  const canPickHook = it.episodeNumber == null && it.kind !== "clip" && !!it.script.trim() && !busy && it.status !== "UPLOADED";
 
   return (
     <>
@@ -233,6 +236,37 @@ export default async function ItemPage({ params, searchParams }: { params: Promi
             <button>Devam bölümünü üret</button>
           </div>
         </form>
+      )}
+
+      {canPickHook && (
+        <div className="card" id="kanca">
+          <h2 style={{ marginTop: 0 }}>Kanca (ilk cümle)</h2>
+          <p className="muted" style={{ marginTop: 0 }}>
+            İzlenmeyi en çok ilk cümle belirliyor. Örnek videoda aynı videolar, kanca elle düzeltilince 1-2 binden 10 binin üstüne çıktı.
+            Bir öneri seç ya da kendin yaz: metnin ilk cümlesi değişir{it.videoPath ? ", ses ve görseller yeniden üretilir" : ""}.
+          </p>
+          <form action={pickHook}>
+            <input type="hidden" name="id" value={it.id} />
+            <div className="checks" style={{ gridTemplateColumns: "1fr" }}>
+              {(hookOptions.length ? hookOptions : [it.hook]).filter(Boolean).map((h, i) => (
+                <label key={i}>
+                  <input type="radio" name="hook" value={h} defaultChecked={h === it.hook} /> {h}
+                  {h === it.hook && <span className="muted"> (şu anki)</span>}
+                </label>
+              ))}
+            </div>
+            <label>Ya da kendi kancanı yaz</label>
+            <input name="custom" placeholder="ör. Daha ortada Icardi ve Osimhen yokken Galatasaraylıların bomba golcüsü olan Gomis'e ne oldu?" />
+            <div className="row" style={{ marginTop: 10 }}>
+              <button className="secondary" name="then" value="save">Kancayı uygula</button>
+              {["DRAFT", "APPROVED", "FAILED", "READY"].includes(it.status) && <button name="then" value="produce">Uygula ve üret</button>}
+            </div>
+          </form>
+          <form action={moreHooks} style={{ marginTop: 8 }}>
+            <input type="hidden" name="id" value={it.id} />
+            <button className="secondary">Claude yeni kancalar önersin</button>
+          </form>
+        </div>
       )}
 
       <div className="card">

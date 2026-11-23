@@ -116,6 +116,7 @@ export default async function Dashboard() {
           <select name="mode" defaultValue="review" style={{ width: "auto" }}>
             <option value="publish">Üret ve hemen yayınla</option>
             <option value="review">Üret, önce ben bakayım</option>
+            {s.contentFormat !== "story" && <option value="hook">Metni yaz, kancayı ben seçeyim</option>}
           </select>
           <button>Üret</button>
         </div>
