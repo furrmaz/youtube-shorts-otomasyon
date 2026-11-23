@@ -3,7 +3,15 @@ import path from "node:path";
 import { ffmpeg } from "./ffmpeg";
 import type { Word } from "./tts";
 
-export type Scene = { text: string; imagePrompt: string; start: number; end: number; image?: string };
+export type Stat = { value: string; label: string };
+export type Pitch = "none" | "kaleci" | "defans" | "orta saha" | "kanat" | "forvet";
+export type Scene = {
+  text: string; imagePrompt: string; start: number; end: number; image?: string;
+  /** Sahnede gösterilecek istatistik kartı (metinde geçen sayılar) */
+  stats?: Stat[];
+  /** Futbol sahası çiziminde vurgulanacak mevki */
+  pitch?: Pitch;
+};
 
 const W = 1080;
 const H = 1920;
@@ -20,7 +28,7 @@ const XFADE = 0.4; // geçiş süresi (sn)
 const TRANSITIONS = ["fade", "smoothleft", "smoothup", "circleopen", "slideleft", "fadeblack", "smoothright", "radial"];
 
 /** Sahne metinlerini kelime sayısına göre ses zamanlamasına oturtur */
-export function timeScenes(scenes: { text: string; imagePrompt: string }[], words: Word[], duration: number): Scene[] {
+export function timeScenes<T extends { text: string; imagePrompt: string }>(scenes: T[], words: Word[], duration: number): (T & Scene)[] {
   const counts = scenes.map((s) => Math.max(1, s.text.split(/\s+/).filter(Boolean).length));
   const total = counts.reduce((a, b) => a + b, 0);
   const scale = words.length / total; // Claude metni birebir bölmediyse orantılı eşle
@@ -82,7 +90,19 @@ const clean = (w: string) => w.replace(/[{}\\]/g, "").replace(/\n/g, " ");
 const upper = (w: string) => clean(w).toLocaleUpperCase("tr-TR");
 
 export type Motion = "normal" | "slow";
-export type SubtitleStyle = "karaoke" | "minimal" | "off";
+export type SubtitleStyle = "karaoke" | "minimal" | "line" | "off";
+
+/** Kanalın görsel dili: font, harf aralığı, tek satır altyazı uzunluğu, palet */
+export type AssLook = {
+  font?: string;
+  /** Premiere birimi (1/1000 em), ör. -40 */
+  tracking?: number;
+  captionMaxChars?: number;
+  primary?: string;
+  accent?: string;
+  dark?: string;
+};
+export type StatCard = { start: number; end: number; stats: Stat[]; pitch?: Pitch };
 export type Overlays = {
   subtitleStyle?: SubtitleStyle;
   titleCard?: { title: string; badge: string }; // açılış: dizi adı + "BÖLÜM 1 · ..."
@@ -91,6 +111,68 @@ export type Overlays = {
   hook?: string; // bilgi videolarında ilk saniyelerde büyük başlık
   highlight?: string; // karaoke vurgu rengi (#RRGGBB), marka rengi
   promoCard?: { title: string; cta: string; url?: string; color?: string; start: number; end: number }; // tanıtım kapanışı
+  look?: AssLook;
+  statCards?: StatCard[];
+};
+
+// Tek satır altyazıda satır sonuna bırakılmaması gereken bağlaçlar ve edatlar
+const WEAK_END = new Set("ve ile ama fakat ya da de ki bir bu şu o için gibi en çok daha hem ne the a an and of to in".split(" "));
+
+/**
+ * Tek satır altyazı grupları: satır başına en fazla `max` harf, cümle ve virgül sonlarında böler,
+ * satırı bağlaç/edatla bitirmez (Premiere'deki "35 harf, mantıklı yerden böl" kuralı).
+ */
+export function lineGroups(words: Word[], max = 35, until = Infinity): Word[][] {
+  const groups: Word[][] = [];
+  let g: Word[] = [];
+  const len = (ws: Word[]) => ws.reduce((a, w) => a + clean(w.word).length, 0) + Math.max(0, ws.length - 1);
+  const flush = () => {
+    if (g.length) groups.push(g);
+    g = [];
+  };
+  for (const w of words) {
+    if (w.start >= until) break;
+    if (g.length && len([...g, w]) > max) {
+      // Satırı zayıf bir kelimeyle bitirme: son kelimeyi alt satıra taşı
+      const last = g.at(-1)!;
+      if (g.length > 2 && WEAK_END.has(clean(last.word).toLocaleLowerCase("tr-TR").replace(/[^\p{L}]/gu, ""))) {
+        g.pop();
+        flush();
+        g.push(last);
+      } else flush();
+    }
+    g.push(w);
+    const t = clean(w.word);
+    // Cümle sonu her zaman, virgül/iki nokta ise satır yeterince doluysa böler; uzun duraklama da böler
+    if (/[.!?…]$/.test(t) || (/[,;:]$/.test(t) && len(g) >= max * 0.45) || w.end - g[0].start > 3.2) {
+      // Tek kelime kalan satır olmasın: önceki satırın son kelimesini bu satıra al
+      const prev = groups.at(-1);
+      if (g.length === 1 && prev && prev.length >= 3 && !/[.!?…,;:]$/.test(clean(prev.at(-1)!.word))) g.unshift(prev.pop()!);
+      flush();
+    }
+  }
+  flush();
+  return groups;
+}
+
+/** ASS çizim: elips yolu (4 Bézier) */
+function ellipse(cx: number, cy: number, rx: number, ry: number) {
+  const k = 0.5523;
+  const f = (n: number) => n.toFixed(0);
+  return `m ${f(cx - rx)} ${f(cy)} b ${f(cx - rx)} ${f(cy - ry * k)} ${f(cx - rx * k)} ${f(cy - ry)} ${f(cx)} ${f(cy - ry)} ` +
+    `b ${f(cx + rx * k)} ${f(cy - ry)} ${f(cx + rx)} ${f(cy - ry * k)} ${f(cx + rx)} ${f(cy)} ` +
+    `b ${f(cx + rx)} ${f(cy + ry * k)} ${f(cx + rx * k)} ${f(cy + ry)} ${f(cx)} ${f(cy + ry)} ` +
+    `b ${f(cx - rx * k)} ${f(cy + ry)} ${f(cx - rx)} ${f(cy + ry * k)} ${f(cx - rx)} ${f(cy)}`;
+}
+const rect = (x: number, y: number, w: number, h: number) => `m ${x} ${y} l ${x + w} ${y} ${x + w} ${y + h} ${x} ${y + h}`;
+
+// Yatay saha (sağa hücum) üzerinde mevki noktası: x, y oranları
+const PITCH_SPOT: Record<Exclude<Pitch, "none">, [number, number]> = {
+  kaleci: [0.06, 0.5],
+  defans: [0.24, 0.62],
+  "orta saha": [0.5, 0.42],
+  kanat: [0.7, 0.14],
+  forvet: [0.84, 0.5],
 };
 
 /** #RRGGBB -> ASS renk (&HBBGGRR&) */
@@ -101,9 +183,12 @@ export function assColor(hex: string | undefined, fallback = "&H00E6FF&") {
 
 /** Altyazı + açılış/seçim kartları + filigran (ASS) */
 export function buildAss(words: Word[], o: Overlays = {}, total = 0): string {
-  const font = process.env.SUBTITLE_FONT || "Arial";
-  const title = process.env.TITLE_FONT || "Impact";
+  const look = o.look ?? {};
+  const font = look.font || process.env.SUBTITLE_FONT || "Arial";
+  const title = look.font || process.env.TITLE_FONT || "Impact";
   const style = o.subtitleStyle ?? "karaoke";
+  // Harf aralığı: Premiere'deki tracking (1/1000 em) ASS'de piksel; her stilin punto büyüklüğüne göre
+  const sp = (size: number, def = 0) => (look.tracking ? ((look.tracking / 1000) * size).toFixed(1) : String(def));
   // Renkler ASS'de &HAABBGGRR
   const header = `[Script Info]
 ScriptType: v4.00+
@@ -113,17 +198,20 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Karaoke,${font},88,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,3,2,80,80,560,1
-Style: Minimal,${font},56,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,3,2,2,90,90,330,1
-Style: Title,${title},150,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,2,0,1,0,6,4,70,70,0,1
+Style: Karaoke,${font},88,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,${sp(88, 0)},0,1,7,3,2,80,80,560,1
+Style: Minimal,${font},56,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,${sp(56, 0)},0,1,3,2,2,90,90,330,1
+Style: Title,${title},150,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,${sp(150, 2)},0,1,0,6,4,70,70,0,1
 Style: Badge,${font},44,&H00FFFFFF,&H00FFFFFF,&H003B30E6,&H00000000,-1,0,0,0,100,100,1,0,3,10,0,4,70,70,0,1
-Style: Big,${title},120,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,2,0,1,0,5,5,60,60,0,1
-Style: BigRed,${title},140,&H003B30E6,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,2,0,1,0,5,5,60,60,0,1
-Style: Option,${font},54,&H00FFFFFF,&H00FFFFFF,&H00241A16,&H00000000,-1,0,0,0,100,100,1,0,3,22,0,4,110,110,0,1
-Style: Small,${font},50,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,1,0,1,0,3,5,60,60,0,1
-Style: SmallRed,${font},42,&H003B30E6,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,1,0,1,0,3,5,60,60,0,1
+Style: Big,${title},120,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,${sp(120, 2)},0,1,0,5,5,60,60,0,1
+Style: BigRed,${title},140,&H003B30E6,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,${sp(140, 2)},0,1,0,5,5,60,60,0,1
+Style: Option,${font},54,&H00FFFFFF,&H00FFFFFF,&H00241A16,&H00000000,-1,0,0,0,100,100,${sp(54, 1)},0,3,22,0,4,110,110,0,1
+Style: Small,${font},50,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,${sp(50, 1)},0,1,0,3,5,60,60,0,1
+Style: SmallRed,${font},42,&H003B30E6,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,${sp(42, 1)},0,1,0,3,5,60,60,0,1
 Style: Mark,${font},34,&H50FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,9,50,50,60,1
-Style: Hook,${title},104,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,1,0,1,7,4,5,70,70,0,1
+Style: Hook,${title},104,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,${sp(104, 1)},0,1,7,4,5,70,70,0,1
+Style: Line,${font},62,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,0,0,0,0,100,100,${sp(62)},0,1,0,4,2,50,50,390,1
+Style: StatValue,${title},96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,${sp(96)},0,1,0,3,5,0,0,0,1
+Style: StatLabel,${font},38,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,0,0,0,0,100,100,${sp(38, 1)},0,1,0,2,5,0,0,0,1
 Style: Shade,${font},10,&H00000000,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
 
 [Events]
@@ -136,7 +224,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   // Altyazı
   const subEnd = o.endCard ? o.endCard.start : o.promoCard ? o.promoCard.start : Infinity;
   const hl = assColor(o.highlight);
-  if (style !== "off") {
+  if (style === "line") {
+    const titleEnd = o.titleCard ? 3.2 : 0;
+    const groups = lineGroups(words, look.captionMaxChars ?? 35, subEnd);
+    groups.forEach((grp, gi) => {
+      const nextStart = gi + 1 < groups.length ? groups[gi + 1][0].start : Infinity;
+      const a = Math.max(grp[0].start, titleEnd);
+      // Satır, sonraki satır başlayana kadar ekranda kalır (kısa duraklamalarda boşluk olmasın)
+      const b = Math.min(nextStart - grp.at(-1)!.end < 0.6 ? nextStart : grp.at(-1)!.end + 0.25, subEnd);
+      // \q2: satır hiçbir zaman ikiye bölünmez
+      if (b > a) ev(1, a, b, "Line", `{\\q2}${grp.map((x) => clean(x.word)).join(" ")}`);
+    });
+  } else if (style !== "off") {
     const maxWords = style === "karaoke" ? 3 : 6;
     const maxSec = style === "karaoke" ? 1.3 : 2.4;
     const groups: Word[][] = [];
@@ -199,6 +298,48 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     if (o.promoCard.url) ev(2, a + 0.8, b, "Small", `{\\fad(250,0)\\pos(${W / 2},990)\\c${col}\\b1}${clean(o.promoCard.url)}`);
   }
 
+  // İstatistik kartları ve saha çizimi: aşağıdan yukarı kayarak gelen sade kart (zıplama yok)
+  for (const c of o.statCards ?? []) {
+    const a = c.start + 0.25;
+    const b = c.end - 0.15;
+    if (b - a < 1) continue;
+    const pc = assColor(look.primary, "&H7AD2FF&");
+    const dark = assColor(look.dark, "&H181410&");
+    const items = c.stats.slice(0, 3);
+    let top = 250;
+    if (c.pitch && c.pitch !== "none") {
+      const pw = 760, ph = 470, px = (W - pw) / 2, py = top;
+      const mv = (dy = 0) => `\\move(0,${dy + 40},0,${dy},0,350)`;
+      const line = `{\\an7${mv()}\\fad(300,250)\\p1\\1a&HFF&\\bord4\\3c&HFFFFFF&\\3a&H50&\\shad0}`;
+      ev(3, a, b, "Shade", `{\\an7${mv()}\\fad(300,250)\\p1\\1c${dark}\\1a&H30&\\bord0\\shad0}${rect(px - 20, py - 20, pw + 40, ph + 40)}{\\p0}`);
+      ev(4, a, b, "Shade", `${line}${rect(px, py, pw, ph)}{\\p0}`);
+      ev(4, a, b, "Shade", `${line}m ${px + pw / 2} ${py} l ${px + pw / 2 + 1} ${py} ${px + pw / 2 + 1} ${py + ph} ${px + pw / 2} ${py + ph}{\\p0}`);
+      ev(4, a, b, "Shade", `${line}${ellipse(px + pw / 2, py + ph / 2, 70, 70)}{\\p0}`);
+      ev(4, a, b, "Shade", `${line}${rect(px, py + ph * 0.22, pw * 0.16, ph * 0.56)}{\\p0}`);
+      ev(4, a, b, "Shade", `${line}${rect(px + pw * 0.84, py + ph * 0.22, pw * 0.16, ph * 0.56)}{\\p0}`);
+      const [fx, fy] = PITCH_SPOT[c.pitch];
+      const dx = px + pw * fx, dy = py + ph * fy;
+      // Mevki noktası: yerine oturduktan sonra yumuşak nabız
+      ev(5, a + 0.35, b, "Shade", `{\\an7\\pos(0,0)\\fad(250,250)\\p1\\1c${pc}\\bord0\\shad0\\t(400,900,\\1a&H00&)}${ellipse(dx, dy, 26, 26)}{\\p0}`);
+      ev(5, a + 0.35, b, "Shade", `{\\an7\\pos(0,0)\\fad(250,250)\\p1\\1a&HFF&\\bord3\\3c${pc}\\shad0\\t(0,1200,\\3a&HFF&)}${ellipse(dx, dy, 52, 52)}{\\p0}`);
+      ev(5, a + 0.4, b, "StatLabel", `{\\fad(250,250)\\pos(${W / 2},${py + ph + 60})}${clean(c.pitch.toLocaleUpperCase("tr-TR"))}`);
+      top = py + ph + 110;
+    }
+    if (items.length) {
+      const colW = 300, cardW = colW * items.length + 40, cardH = 210;
+      const cx = (W - cardW) / 2;
+      const mv = `\\move(0,40,0,0,0,350)`;
+      ev(3, a, b, "Shade", `{\\an7${mv}\\fad(300,250)\\p1\\1c${dark}\\1a&H30&\\bord0\\shad0}${rect(cx, top, cardW, cardH)}{\\p0}`);
+      ev(4, a, b, "Shade", `{\\an7${mv}\\fad(300,250)\\p1\\1c${pc}\\bord0\\shad0}${rect(cx, top, cardW, 6)}{\\p0}`);
+      items.forEach((it, i) => {
+        const x = cx + 20 + colW * i + colW / 2;
+        const d = i * 0.12; // kartlar sırayla gelir
+        ev(5, a + d, b, "StatValue", `{\\fad(250,250)\\move(${x},${top + 112},${x},${top + 82},0,350)\\c${pc}}${clean(it.value)}`);
+        ev(5, a + d, b, "StatLabel", `{\\fad(250,250)\\move(${x},${top + 192},${x},${top + 162},0,350)}${clean(it.label.toLocaleUpperCase("tr-TR"))}`);
+      });
+    }
+  }
+
   // Açılış kancası: ilk saniyelerde üstte büyük başlık (izleyiciyi tutmak için)
   if (o.hook) {
     ev(2, 0.1, 2.9, "Hook", `{\\fad(200,350)\\pos(${W / 2},360)}${upper(o.hook)}`);
@@ -258,6 +399,9 @@ export type Brand = { primaryColor?: string; logoPath?: string | null };
 
 const ffColor = (hex: string | undefined, def: string) => (/^#[0-9a-f]{6}$/i.test(hex ?? "") ? `0x${hex!.slice(1)}` : def);
 const assArg = (p: string) => path.relative(process.cwd(), p).replace(/\\/g, "/").replace(/:/g, "\\:");
+/** ass filtresi; kanalın kendi fontu varsa o klasör de taranır */
+const assFilter = (assPath: string, fontsDir?: string) =>
+  `ass='${assArg(assPath)}'${fontsDir ? `:fontsdir='${assArg(fontsDir)}'` : ""}`;
 
 /** İlerleme çubuğu (marka rengi) ve logo bindirmesi; son etiketi döndürür */
 function brandOverlays(
@@ -347,6 +491,10 @@ export async function renderVideo(opts: {
   onProgress?: (msg: string) => Promise<void> | void;
   /** Videoya özel kurgu tohumu: kamera hareketi, geçiş sırası ve parçacıklar her videoda farklı dizilir */
   variant?: number;
+  /** Kanalın yüklediği fontun klasörü */
+  fontsDir?: string;
+  /** Sahnelerdeki istatistik kartlarını göster */
+  statCards?: boolean;
 }) {
   const { dir, scenes, audioPath, words, outPath } = opts;
   const v = opts.variant ?? 0;
@@ -377,6 +525,18 @@ export async function renderVideo(opts: {
   const overlays = { ...opts.overlays };
   if (overlays.endCard) overlays.endCard = { ...overlays.endCard, start: total - endSec, end: total };
   if (overlays.promoCard) overlays.promoCard = { ...overlays.promoCard, start: total - endSec, end: total };
+  if (opts.statCards) {
+    // Sahnenin videodaki gerçek aralığı (geçişler sahneleri xf kadar üst üste bindirir)
+    let t = 0;
+    overlays.statCards = [];
+    scenes.forEach((sc, i) => {
+      const a = t;
+      t += durations[i] - xf;
+      const b = i === scenes.length - 1 ? total - endSec : t;
+      if ((sc.stats?.length || (sc.pitch && sc.pitch !== "none")) && b - a > 1.6)
+        overlays.statCards!.push({ start: a, end: b, stats: sc.stats ?? [], pitch: sc.pitch });
+    });
+  }
   const assPath = path.join(dir, "subs.ass");
   await fs.writeFile(assPath, buildAss(words, overlays, total), "utf8");
 
@@ -417,7 +577,7 @@ export async function renderVideo(opts: {
   }
   prev = brandOverlays(filters, prev, add, fx, total, opts.brand);
   // ass filtresi yol içindeki ':' ve '\\' karakterlerinden etkilenir; göreli yol kullan
-  filters.push(`${prev}ass='${assArg(assPath)}'[v]`);
+  filters.push(`${prev}${assFilter(assPath, opts.fontsDir)}[v]`);
 
   const ai = add("-i", audioPath);
   const mix: string[] = [];
@@ -520,6 +680,7 @@ export async function renderClip(opts: {
   fx?: RenderFx;
   musicPath?: string | null;
   musicVolume?: number;
+  fontsDir?: string;
 }) {
   const { dir, source, segments, outPath } = opts;
   const fx = opts.fx ?? {};
@@ -569,7 +730,7 @@ export async function renderClip(opts: {
   ];
   let prev = "[comp]";
   prev = brandOverlays(filters, prev, add, fx, total, opts.brand);
-  filters.push(`${prev}ass='${assArg(assPath)}'[v]`);
+  filters.push(`${prev}${assFilter(assPath, opts.fontsDir)}[v]`);
 
   // 4) Ses: anlatım + (kısık) kaynak ses + müzik
   const mix: string[] = [];

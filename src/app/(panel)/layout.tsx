@@ -26,6 +26,7 @@ export default async function PanelLayout({ children }: { children: ReactNode })
     { href: "/", label: "Panel" },
     { href: "/calendar", label: ch.contentFormat === "story" ? "Bölümler" : "Takvim" },
     { href: "/media", label: "Medya" },
+    ...(ch.contentFormat !== "story" ? [{ href: "/ideas", label: "İzleyici istekleri" }] : []),
     { href: "/clips", label: "Demo klipleri" },
     ...(ch.contentFormat === "promo" ? [{ href: "/sales", label: "Satış videoları" }] : []),
     { href: "/style", label: "Örnek video" },

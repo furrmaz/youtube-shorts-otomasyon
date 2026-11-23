@@ -73,13 +73,53 @@ Rapor ${langName(s.language)} dilinde olsun.`,
   throw new Error("Araştırma tamamlanamadı (pause_turn sınırı)");
 }
 
+/** Bilgi videosunun hedef süresi (kanal ayarı, 30-170 sn) */
+const secondsOf = (s: unknown) => Math.min(170, Math.max(30, Number((s as { channel?: { infoSeconds?: number } }).channel?.infoSeconds) || 55));
+/** Türkçe seslendirmede ~2.4 kelime/sn */
+const wordRange = (s: unknown) => {
+  const w = secondsOf(s) * 2.4;
+  return `${Math.round(w * 0.9)}-${Math.round(w * 1.1)}`;
+};
+
 const overusedBlock = (o: string[]) =>
   o.length ? `Son videolarda çok kullanılan açılışlar (bunlarla başlama): ${o.map((x) => `"${x}…"`).join(", ")}\n` : "";
 
+/**
+ * Kanca kuralları. Örnek futbol kanalında yapay zekânın düz kancaları ("X'e ne oldu?") 1-2 bin izlenmede kaldı;
+ * aynı videolar somut ve tuhaf bir ayrıntı + herkesin bildiği bir referansla açılınca 10 bini geçti.
+ */
+export const HOOK_RULES = `KANCA (ilk cümle) KURALLARI: izlenmeyi en çok belirleyen şey budur.
+- Düz, genel kalıplarla açma ("X'e ne oldu?", "Bunu biliyor muydunuz?", "Bugün size ... anlatacağım" gibi).
+- Konuya özgü, somut ve şaşırtıcı bir ayrıntıyla aç: bir tuhaflık, bir rakam, bir çelişki, bir dedikodu değeri olan gerçek.
+- İzleyicinin zaten bildiği bir referansa bağla (daha ünlü bir isim, bir dönem, bir olay) ki ilk saniyede neden önemli olduğunu anlasın.
+- Tek cümle, en fazla ~18 kelime, sesli okununca doğal olsun. Uydurma bilgi kullanma.
+Örnek dönüşüm: "Bir zamanların yıldız futbolcusu Gomis'e ne oldu?" yerine "Daha ortada Icardi ve Osimhen yokken Galatasaraylıların bomba golcüsü olan Gomis'e ne oldu?"`;
+
+/** Kanalın kendi kanca örnekleri (kullanıcının yazdığı / en çok izlenenler) */
+export function hookBlock(s: unknown): string {
+  const ex = String((s as { channel?: { hookExamples?: string } }).channel?.hookExamples ?? "")
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+  return ex.length
+    ? `\nKullanıcının beğendiği kanca örnekleri (bu ses tonunu ve somutluğu yakala, cümleleri kopyalama):\n${ex.map((x) => `- ${x}`).join("\n")}`
+    : "";
+}
+
+/** Videonun sabit kapanış cümlesi (kanalda tanımlıysa) */
+export function endLineBlock(s: unknown): string {
+  const e = String((s as { channel?: { endLine?: string } }).channel?.endLine ?? "").trim();
+  return e ? `\n- Metnin SON cümlesi aynen şu olsun: "${e}"` : "";
+}
+
 const CalendarItem = z.object({
   topic: z.string().describe("Kısa konu başlığı"),
-  hook: z.string().describe("İlk 2 saniyede söylenecek, merak uyandıran tek cümle"),
-  script: z.string().describe("Seslendirilecek tam metin; kanca ile başlar, 110-150 kelime, 45-60 saniye"),
+  hook: z.string().describe("İlk 2 saniyede söylenecek, merak uyandıran tek cümle (en güçlü kanca)"),
+  hookOptions: z
+    .array(z.string())
+    .describe("hook ile aynı konuda, farklı açılardan yazılmış 3 ALTERNATİF kanca cümlesi (hook'un kendisi hariç)"),
+  script: z.string().describe("Seslendirilecek tam metin; kanca (hook) cümlesiyle başlar"),
   title: z.string().describe("YouTube başlığı, en fazla 90 karakter, #Shorts içermez"),
   description: z.string().describe("2-4 cümlelik açıklama + 3-5 hashtag"),
   tags: z.array(z.string()).describe("8-15 etiket"),
@@ -102,6 +142,8 @@ export async function generateCalendarChunk(
     output_config: { effort: "medium", format: betaZodOutputFormat(CalendarChunk) },
     system: `Sen deneyimli bir YouTube Shorts senaristisin. Bilgilendirici, doğru ve akıcı metinler yazarsın.
 Metinler seslendirileceği için kısa cümleler kullan, emoji, madde işareti ve sahne yönergesi yazma.
+Yapay zekâ yazdığı belli olan klişelerden kaçın ("Peki ya...", "Hadi gelin", "inanılmaz ama gerçek", "sonuç olarak" gibi), bir insan anlatıyormuş gibi yaz.
+${HOOK_RULES}
 ${ORIGINALITY_RULES}
 Tüm çıktı ${langName(s.language)} dilinde olsun.`,
     messages: [
@@ -117,8 +159,9 @@ ${research}
 
 ${avoidTopics.length ? `Kanalda daha önce yapılan videolar (konuyu, başlığı ve kanca kalıbını tekrar etme):\n${avoidTopics.map((t) => "- " + t).join("\n")}\n` : ""}${overusedBlock(overused)}
 Tam olarak ${count} farklı Shorts videosu planla. Videolar birbirine de benzemesin. Her biri:
-- Kanca ile başlayan, tek bir bilgiyi net anlatan, sonunda kısa bir merak/etkileşim cümlesi olan 110-150 kelimelik metin
-- Sadece doğruluğundan emin olduğun bilgiler${styleBlock(s)}`,
+- Kanca ile başlayan, tek bir konuyu net anlatan, sonunda kısa bir merak/etkileşim cümlesi olan ${wordRange(s)} kelimelik metin (yaklaşık ${secondsOf(s)} saniye seslendirme)
+- hook alanındaki cümle metnin ilk cümlesiyle birebir aynı olsun; hookOptions'a 3 farklı alternatif yaz
+- Sadece doğruluğundan emin olduğun bilgiler${endLineBlock(s)}${hookBlock(s)}${styleBlock(s)}`,
       },
     ],
     ...FALLBACK,
@@ -128,6 +171,10 @@ Tam olarak ${count} farklı Shorts videosu planla. Videolar birbirine de benzeme
   return res.parsed_output.items.slice(0, count);
 }
 
+const StatZ = z.object({
+  value: z.string().describe("Kısa rakam/değer, metinde geçtiği gibi (ör. '116', '20', '2003')"),
+  label: z.string().describe("1-2 kelimelik etiket, BÜYÜK HARF değil (ör. 'maç', 'gol', 'kupa')"),
+});
 const ScenePlan = z.object({
   styleAnchor: z
     .string()
@@ -136,6 +183,12 @@ const ScenePlan = z.object({
     z.object({
       text: z.string().describe("Metnin bu sahneye düşen bölümü, kelimesi kelimesine"),
       imagePrompt: z.string().describe("İngilizce görsel istemi: sahnede ne görünüyor; yazı/harf içermez"),
+      stats: z
+        .array(StatZ)
+        .describe("Bu sahnenin metninde AÇIKÇA geçen 1-3 sayı (istatistik kartı için); sayı yoksa veya kart gereksizse boş dizi"),
+      pitch: z
+        .enum(["none", "kaleci", "defans", "orta saha", "kanat", "forvet"])
+        .describe("Futbolla ilgili bir sahnede oyuncunun mevkisi saha çiziminde gösterilecekse mevki; değilse 'none'"),
     }),
   ),
 });
@@ -146,7 +199,7 @@ export async function planScenes(
   s: AppSettings,
   script: string,
   topic: string,
-  opts: { minScenes?: number; maxScenes?: number; characters?: string } = {},
+  opts: { minScenes?: number; maxScenes?: number; characters?: string; statCards?: boolean } = {},
 ): Promise<ScenePlanT> {
   const minS = opts.minScenes ?? 6;
   const maxS = opts.maxScenes ?? 10;
@@ -165,6 +218,7 @@ Her sahne için bir görsel istemi yaz. Tüm görseller aynı çizim stilinde ol
 İstemler İngilizce olsun, sadece sahnenin içeriğini anlatsın (stil ayrıca eklenecek), görselde yazı, harf, logo olmasın. Dikey (9:16) kompozisyon düşün, ana öğe ortada.
 ${styleOf(s) ? `Sahne kurgusunu örnek videodaki gibi yap: ${styleOf(s)!.sceneGuide}` : "Sinematik çekim açılarını çeşitlendir: geniş açı, yakın çekim, nesneye yakın plan, karakterin yüzüne yakın çekim, omuz üstü bakış vb."}
 ${opts.characters ? `Karakterler sahnede göründüğünde bu tariflere birebir uy (styleAnchor'a da ekle):\n${opts.characters}` : ""}
+${opts.statCards ? `İstatistik kartları: sahne metninde maç, gol, yıl, kupa, para gibi somut bir sayı geçiyorsa "stats" alanına yaz; ekranda sade bir kart olarak görünecek. Sadece metinde yazan sayıları kullan, asla sayı uydurma. Kartları seyrek kullan (videoda en fazla 4 sahne). Futbol videosunda oyuncunun mevkisinden söz edilen sahnede "pitch" alanına mevkiyi yaz (videoda en fazla 1 kez), diğerlerinde "none".` : `"stats" alanını boş dizi, "pitch" alanını "none" bırak.`}
 
 Konu: ${topic}
 Metin:
@@ -367,6 +421,7 @@ export async function generatePromoChunk(
     output_config: { effort: "medium", format: betaZodOutputFormat(CalendarChunk) },
     system: `Sen B2B yazılım ürünleri için kısa dikey video (Shorts, Reels, TikTok) senaryoları yazan bir pazarlama senaristisin.
 ${PROMO_RULES}
+${HOOK_RULES}
 ${ORIGINALITY_RULES}
 Tüm çıktı ${langName(s.language)} dilinde olsun.`,
     messages: [
@@ -379,7 +434,7 @@ ${research ? `Hedef kitle hakkında araştırma notları:\n<research>\n${researc
 ${avoidTopics.length ? `Daha önce kullanılan açılar ve başlıklar (tekrar etme, aynı kanca kalıbıyla başlama):\n${avoidTopics.map((t) => "- " + t).join("\n")}\n` : ""}${overusedBlock(overused)}
 Tam olarak ${count} farklı tanıtım videosu yaz. Her biri farklı bir açıdan olsun; örnek açılar:
 günün kötü bir anı ve çözümü, tek bir özelliğe yakın plan, "bunu hâlâ elle mi yapıyorsun?", önce/sonra, 3 işaret (bu ürüne ihtiyacın olduğunu gösteren), sık yapılan bir hata, bir çalışanın/patronun bakış açısı, sektöre özel bir senaryo.
-topic alanına açıyı kısaca yaz. Açıklamanın sonuna web adresini ve 3-5 hashtag ekle.${styleBlock(s)}`,
+topic alanına açıyı kısaca yaz. hook metnin ilk cümlesiyle aynı olsun, hookOptions'a 3 alternatif kanca yaz. Açıklamanın sonuna web adresini ve 3-5 hashtag ekle.${endLineBlock(s)}${hookBlock(s)}${styleBlock(s)}`,
       },
     ],
     ...FALLBACK,
@@ -413,7 +468,7 @@ Tüm çıktı ${langName(s.language)} dilinde olsun.`,
         content: `${productBrief(s)}
 
 Sektör: ${sector}
-Bu sektördeki bir işletme için video yaz. topic alanı "${sector}" olsun. Başlıkta sektörü an.`,
+Bu sektördeki bir işletme için video yaz. topic alanı "${sector}" olsun. Başlıkta sektörü an. hook metnin ilk cümlesiyle aynı olsun, hookOptions'a 3 alternatif kanca yaz.`,
       },
     ],
     ...FALLBACK,
@@ -571,4 +626,74 @@ export function styleBlock(s: unknown): string {
 - Bitiş: ${p.ending}
 - Hedef süre: yaklaşık ${Math.round(p.seconds)} saniye${words ? ` (≈ ${words} kelime)` : ""}
 Konuyu değil biçimi kopyala; örnekteki isimleri, markaları ve cümleleri aynen kullanma.`;
+}
+
+// ---------------- Kanca önerileri ve yorumlardan konu istekleri ----------------
+
+const HookList = z.object({ hooks: z.array(z.string()).describe("Farklı açılardan 4 kanca cümlesi") });
+
+/** Var olan bir video için yeni kanca alternatifleri */
+export async function suggestHooks(s: unknown, item: { topic: string; script: string; hook: string }, perf = ""): Promise<string[]> {
+  const st = s as AppSettings;
+  const { api, model } = await client();
+  const res = await api.beta.messages.parse({
+    model,
+    max_tokens: 4000,
+    output_config: { effort: "medium", format: betaZodOutputFormat(HookList) },
+    system: `Sen YouTube Shorts için açılış cümlesi (kanca) yazan bir senaristsin.
+${HOOK_RULES}
+Tüm çıktı ${langName(st.language)} dilinde olsun.`,
+    messages: [
+      {
+        role: "user",
+        content: `Konu: ${item.topic}
+Şu anki kanca: ${item.hook}
+Videonun metni:
+"""${item.script}"""
+${perf}${hookBlock(s)}
+Bu video için 4 yeni ve birbirinden farklı kanca yaz. Her biri metnin ilk cümlesinin yerine geçecek, metindeki bilgilere dayanacak ve sonrasıyla doğal bağlanacak.`,
+      },
+    ],
+    ...FALLBACK,
+  });
+  if (res.stop_reason === "refusal") throw new Error("Claude kanca isteğini reddetti");
+  return (res.parsed_output?.hooks ?? []).map((h) => h.trim()).filter(Boolean).slice(0, 4);
+}
+
+const Requests = z.object({
+  topics: z.array(
+    z.object({
+      topic: z.string().describe("İstenen konu, kısa ve net (ör. kişi adı ya da olay); kanalın formatına uygun bir video konusu"),
+      count: z.number().describe("Bu konuyu isteyen yorum sayısı"),
+      example: z.string().describe("Bu isteği içeren yorumlardan biri, aynen (en fazla 140 karakter)"),
+    }),
+  ),
+});
+export type TopicRequestT = z.infer<typeof Requests>["topics"][number];
+
+/** Yorumlardan izleyicilerin istediği yeni video konularını çıkarır */
+export async function extractTopicRequests(s: unknown, comments: string[]): Promise<TopicRequestT[]> {
+  const st = s as AppSettings;
+  if (!comments.length) return [];
+  const { api, model } = await client();
+  const res = await api.beta.messages.parse({
+    model,
+    max_tokens: 6000,
+    output_config: { effort: "low", format: betaZodOutputFormat(Requests) },
+    system: "YouTube yorumlarından izleyicilerin istediği yeni video konularını çıkaran bir asistansın. Sadece açık istekleri ve öneri niteliğindeki isimleri al; övgü, eleştiri, sohbet ve spam'i yok say.",
+    messages: [
+      {
+        role: "user",
+        content: `Kanalın konusu: ${st.niche || "-"}
+Aşağıda kanalın son videolarına gelen yorumlar var (her satır bir yorum).
+İzleyicilerin "şunu da anlatın", "X'i yap", "sıradaki Y olsun" gibi istediği veya önerdiği konuları çıkar. Aynı konuyu isteyen yorumları birleştir ve say. Videosu zaten yapılmış gibi görünen konuları da yaz, kanal kendisi eleyecek.
+<comments>
+${comments.map((c) => c.replace(/\s+/g, " ").slice(0, 300)).join("\n")}
+</comments>`,
+      },
+    ],
+    ...FALLBACK,
+  });
+  if (res.stop_reason === "refusal") return [];
+  return res.parsed_output?.topics ?? [];
 }
